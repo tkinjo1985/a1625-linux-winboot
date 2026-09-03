@@ -1,5 +1,7 @@
 # a1625-linux-winboot
 
+[日本語版 README](README.ja.md)
+
 This workspace contains a safety-first, device-validated native Windows boot
 path for the Apple TV HD (A1625 / Apple A8).
 
