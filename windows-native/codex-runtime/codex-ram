@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+export HOME=/run/codex-home
+export CODEX_HOME=/run/codex-home
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+export PATH=/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin
+export TERM="${TERM:-xterm-256color}"
+
+mkdir -p "$CODEX_HOME" /run/work
+chmod 0700 "$CODEX_HOME"
+
+exec /opt/bin/codex "$@"

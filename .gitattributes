@@ -1,0 +1,11 @@
+* text=auto
+
+# These files run inside MSYS or the Linux initramfs and must retain LF line
+# endings even when cloned on Windows.
+*.sh text eol=lf
+windows-native/codex-runtime/codex-ram text eol=lf
+windows-native/minimal-rootfs/init text eol=lf
+windows-native/minimal-rootfs/ram-getty text eol=lf
+windows-native/minimal-rootfs/group text eol=lf
+windows-native/minimal-rootfs/passwd text eol=lf
+windows-native/minimal-rootfs/shadow text eol=lf

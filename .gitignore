@@ -1,0 +1,23 @@
+# Generated payloads, binaries, keys, logs, and build output.
+/artifacts/
+/windows-native/pongo-uploader/target/
+
+# Upstream projects are fetched at pinned revisions; do not vendor their Git
+# histories or local build trees into this repository.
+/third_party/
+
+# Per-device USB identity data. This may contain ECIDs, container IDs, and
+# physical USB topology.
+/windows-native/device-baseline.json
+
+# Local agent/editor state.
+/.agents/
+/.codex/
+/AGENTS.md
+
+# Common local/editor residue.
+*.log
+*.tmp
+*.bak
+.idea/
+.vscode/

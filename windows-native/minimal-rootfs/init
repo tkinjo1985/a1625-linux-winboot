@@ -1,0 +1,93 @@
+#!/bin/busybox sh
+
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+HOST_IP=172.16.42.1
+CLIENT_IP=172.16.42.2
+GADGET=/config/usb_gadget/g1
+
+/bin/busybox --install -s
+
+mkdir -p /proc /sys /dev /run /tmp /config
+mount -t proc -o nodev,noexec,nosuid proc /proc
+mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
+mount -t devtmpfs -o mode=0755,nosuid dev /dev
+mkdir -p /dev/pts
+if ! mount -t devpts -o nosuid,noexec,gid=5,mode=0620,ptmxmode=0666 devpts /dev/pts; then
+    echo "FATAL: devpts mount failed" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+ln -sf pts/ptmx /dev/ptmx
+mount -t tmpfs -o nosuid,nodev,mode=0755 run /run
+mount -t configfs -o nodev,noexec,nosuid configfs /config
+ln -sf /proc/self/fd /dev/fd
+mdev -s
+
+serial="$(tr -d '\000' </proc/device-tree/serial-number 2>/dev/null)"
+[ -n "$serial" ] || serial=unknown
+
+mkdir -p "$GADGET"
+echo 0x05ac >"$GADGET/idVendor"
+echo 0x4142 >"$GADGET/idProduct"
+mkdir -p "$GADGET/strings/0x409"
+echo "Hoolock Linux" >"$GADGET/strings/0x409/manufacturer"
+echo "$serial" >"$GADGET/strings/0x409/serialnumber"
+echo "A1625 minimal Linux" >"$GADGET/strings/0x409/product"
+
+mkdir -p "$GADGET/configs/c.1/strings/0x409"
+echo "NCM + recovery console" >"$GADGET/configs/c.1/strings/0x409/configuration"
+mkdir "$GADGET/functions/ncm.usb0"
+mkdir "$GADGET/functions/acm.usb0"
+ln -s "$GADGET/functions/ncm.usb0" "$GADGET/configs/c.1/ncm.usb0"
+ln -s "$GADGET/functions/acm.usb0" "$GADGET/configs/c.1/acm.usb0"
+
+udc="$(ls /sys/class/udc | head -n 1)"
+if [ -z "$udc" ]; then
+    echo "FATAL: no USB device controller found" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+echo "$udc" >"$GADGET/UDC"
+
+iface="$(cat "$GADGET/functions/ncm.usb0/ifname" 2>/dev/null)"
+[ -n "$iface" ] || iface=usb0
+if ! ifconfig "$iface" "$HOST_IP" netmask 255.255.255.0 up; then
+    echo "FATAL: failed to configure $iface" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+if ! ip route replace default via "$CLIENT_IP" dev "$iface"; then
+    echo "FATAL: failed to install default route" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+printf '%s\n' 'nameserver 1.1.1.1' 'nameserver 8.8.8.8' >/etc/resolv.conf
+/bin/unudhcpd -i "$iface" -s "$HOST_IP" -c "$CLIENT_IP" &
+
+(
+    for delay in 1 1 1 1 1; do
+        [ -e /dev/ttyGS0 ] && break
+        sleep "$delay"
+    done
+    if [ -e /dev/ttyGS0 ]; then
+        echo " " >/dev/ttyGS0
+        read -r _ </dev/ttyGS0 || true
+        while true; do
+            getty -n -l /sbin/ram-getty ttyGS0 115200 vt100
+            sleep 1
+        done
+    fi
+) &
+
+HOST_KEY=/run/dropbear_ed25519_host_key
+if ! dropbearkey -t ed25519 -f "$HOST_KEY"; then
+    echo "FATAL: Dropbear host-key generation failed" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+chmod 0600 "$HOST_KEY"
+
+if ! dropbear -E -s -j -k -p "$HOST_IP:22" -r "$HOST_KEY" -P /run/dropbear.pid; then
+    echo "FATAL: Dropbear failed to start" >/dev/console
+    exec sh </dev/console >/dev/console 2>&1
+fi
+
+echo "A1625 RAM-only minimal Linux ready: ssh root@$HOST_IP" >/dev/console
+while true; do
+    sleep 3600
+done

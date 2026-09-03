@@ -1,0 +1,8 @@
+[package]
+name = "atv-pongo-uploader"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Minimal native Windows PongoOS uploader for Apple TV HD RAM boot research"
+
+[dependencies]

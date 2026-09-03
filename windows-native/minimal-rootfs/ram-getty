@@ -1,0 +1,6 @@
+#!/bin/sh
+
+echo
+echo "A1625 RAM-only recovery shell"
+echo "The root filesystem is volatile; internal storage is not mounted."
+exec /bin/sh -l
