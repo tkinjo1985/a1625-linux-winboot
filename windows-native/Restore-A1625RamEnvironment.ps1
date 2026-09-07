@@ -12,6 +12,11 @@ param(
 
     [switch]$StartCodex,
     [switch]$EnterShell,
+    [ValidateSet('none', 'minimal', 'development')]
+    [string]$DevelopmentProfile = 'none',
+    [switch]$EnableZram,
+    [switch]$RestoreRamState,
+    [string]$RamStateDirectory = (Join-Path $env:LOCALAPPDATA 'AppleTvA1625\ram-state'),
     [switch]$ValidateOnly
 )
 
@@ -30,6 +35,8 @@ $atvModule = Join-Path $repoRoot 'windows-native\AtvNative.psm1'
 $runtimeInstaller = Join-Path $repoRoot 'windows-native\codex-runtime\Install-CodexRamRuntime.ps1'
 $codexStarter = Join-Path $repoRoot 'windows-native\codex-state\Start-A1625Codex.ps1'
 $shellStarter = Join-Path $repoRoot 'windows-native\Enter-A1625Shell.ps1'
+$developmentInstaller = Join-Path $repoRoot 'windows-native\development-tools\Install-A1625DevelopmentTools.ps1'
+$ramStateRestorer = Join-Path $repoRoot 'windows-native\ram-state\Restore-A1625RamState.ps1'
 $stateRoot = Join-Path $env:LOCALAPPDATA 'AppleTvA1625\state'
 $deviceConfig = Join-Path $stateRoot 'device.json'
 $logRoot = Join-Path $env:LOCALAPPDATA 'AppleTvA1625\logs'
@@ -145,7 +152,11 @@ function Confirm-LibusbK {
         Write-Host "`nZadig操作が必要です。次の1デバイスだけを選択してください。" -ForegroundColor Yellow
         $device | Format-List UsbId, FriendlyName, BusDescription, DriverService, InstanceId | Out-Host
         Write-Host 'Zadigを管理者として起動し、Options > List All Devices を有効化します。'
+        Write-Host "変更前に現在のドライバーを記録し、復旧手順を確認してください: $(Join-Path $PSScriptRoot 'DRIVER-ROLLBACK.md')"
         Write-Host "上記の $($device.UsbId) を選び、libusbK に変更してください。ほかのApple USBデバイスは変更しないでください。"
+        if ([Console]::IsInputRedirected) {
+            throw "The verified $Label needs libusbK. Change only this instance, then rerun the restore command; its current stage will be detected."
+        }
         [void](Read-Host '完了後、このPowerShellへ戻ってEnter')
     }
 }
@@ -289,6 +300,7 @@ function Configure-UsbNetwork {
         throw 'The A1625 USB NCM adapter has an unexpected IPv4 configuration; it was not modified.'
     }
     if ($hostIp.Count -eq 0) {
+        Assert-NetworkAdministrator
         New-NetIPAddress -InterfaceIndex $adapter.ifIndex -IPAddress '172.16.42.2' -PrefixLength 24 | Out-Null
     }
     $nat = Get-NetNat -Name 'AppleTvRamNat' -ErrorAction SilentlyContinue
@@ -296,10 +308,18 @@ function Configure-UsbNetwork {
         throw 'AppleTvRamNat exists with an unexpected prefix; it was not modified.'
     }
     if (-not $nat) {
+        Assert-NetworkAdministrator
         New-NetNat -Name 'AppleTvRamNat' -InternalIPInterfaceAddressPrefix '172.16.42.0/24' | Out-Null
     }
     Wait-TcpPort '172.16.42.1' 22 $StageTimeoutSeconds
     Write-Host 'USB NCM 172.16.42.2/24, NAT, and SSH port 22 are ready.'
+}
+
+function Assert-NetworkAdministrator {
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Run PowerShell as Administrator to create the missing USB NCM address or NAT. Existing network configuration can be reused without elevation.'
+    }
 }
 
 function Assert-LinuxUsbIdentity {
@@ -391,14 +411,46 @@ function Get-SerialHostKey {
     $knownHosts
 }
 
+function Wait-LinuxUsbIdentity {
+    $deadline = [DateTimeOffset]::Now.AddSeconds($StageTimeoutSeconds)
+    do {
+        $items = @(Get-ProductDetails '4142')
+        $unexpected = @($items | Where-Object {
+            $_.BusDescription -and $_.BusDescription -notin @('A1625 minimal Linux', 'CDC NCM', 'CDC Serial')
+        })
+        if ($unexpected.Count) { throw 'Unexpected descriptor while waiting for the A1625 Linux USB interfaces.' }
+        $descriptions = @($items | ForEach-Object { $_.BusDescription })
+        if ('A1625 minimal Linux' -in $descriptions -and 'CDC NCM' -in $descriptions -and 'CDC Serial' -in $descriptions) {
+            Assert-LinuxUsbIdentity -Details $items
+            return $items
+        }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTimeOffset]::Now -lt $deadline)
+    throw 'The complete A1625 Linux composite/NCM/ACM layout did not appear before the timeout.'
+}
+
 if (-not $ConfirmRamBoot) {
     throw 'Pass -ConfirmRamBoot to confirm the temporary A1625 RAM-only boot. No persistent storage operation is implemented.'
 }
 if ($StartCodex -and $EnterShell) {
     throw 'Choose either -StartCodex or -EnterShell, not both.'
 }
+if (($EnableZram -or $RestoreRamState) -and $DevelopmentProfile -eq 'none') {
+    throw '-EnableZram and -RestoreRamState require -DevelopmentProfile minimal or development.'
+}
 
 Assert-LocalPreflight
+$preparedLayer = $null
+if ($DevelopmentProfile -ne 'none') {
+    Write-Stage 'Prepare and verify the selected immutable RAM tool layer'
+    & $runtimeInstaller -PrepareOnly | Out-Null
+    $preparedLayer = & $developmentInstaller -Profile $DevelopmentProfile -PrepareOnly
+    if (-not $preparedLayer.BundlePath) { throw 'The development layer preflight did not return a bundle.' }
+    if ($RestoreRamState) {
+        & (Join-Path $repoRoot 'windows-native\ram-state\Test-A1625RamStateSnapshot.ps1') `
+            -StateDirectory $RamStateDirectory -PayloadPath $payload -RuntimePath $preparedLayer.BundlePath | Out-Null
+    }
+}
 if ($ValidateOnly) {
     Write-Host 'Validation-only mode completed; no USB transfer or network change was performed.'
     return
@@ -406,11 +458,6 @@ if ($ValidateOnly) {
 
 $ExpectedEcid = Resolve-ExpectedEcid
 Write-Host 'Loaded the expected ECID from an explicit parameter or the private per-user device configuration.'
-
-$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw 'Run PowerShell as Administrator (required for USB NCM address/NAT setup).'
-}
 
 Import-Module $atvModule -Force
 $linuxDevices = @(Get-ProductDetails '4142')
@@ -463,7 +510,7 @@ if ($linuxDevices.Count -eq 0) {
     $linuxDevices = @(Wait-ProductDetails '4142')
 }
 
-Assert-LinuxUsbIdentity -Details $linuxDevices
+$linuxDevices = @(Wait-LinuxUsbIdentity)
 Configure-UsbNetwork
 $knownHosts = Get-SerialHostKey
 
@@ -475,7 +522,7 @@ $sshOptions = @(
     '-o', 'StrictHostKeyChecking=yes',
     '-o', ('UserKnownHostsFile=' + $knownHosts)
 )
-$healthCommand = 'set -eu; test "$(uname -m)" = aarch64; grep -q "^KernelPageSize:[[:space:]]*4 kB$" /proc/self/smaps; grep -q " / rootfs " /proc/mounts; awk ''NR > 1 && $1 ~ /^[0-9]+$/ { found=1 } END { exit found }'' /proc/partitions; echo a1625_ram_ready'
+$healthCommand = 'set -eu; test "$(uname -m)" = aarch64; grep -q "^KernelPageSize:[[:space:]]*4 kB$" /proc/self/smaps; grep -q " / rootfs " /proc/mounts; awk ''NR > 1 && $1 ~ /^[0-9]+$/ && $4 !~ /^zram[0-9]+$/ { found=1 } END { exit found }'' /proc/partitions; echo a1625_ram_ready'
 $health = & ssh.exe @sshOptions root@172.16.42.1 $healthCommand
 if ($LASTEXITCODE -ne 0 -or ($health -join "`n") -notmatch 'a1625_ram_ready') {
     throw 'RAM Linux health verification failed; Codex was not restored.'
@@ -483,8 +530,21 @@ if ($LASTEXITCODE -ne 0 -or ($health -join "`n") -notmatch 'a1625_ram_ready') {
 Write-Host 'Verified aarch64, 4 KiB pages, RAM rootfs, and no internal block device.'
 
 Write-Stage 'Codex runtime and DPAPI authentication restore'
-& $runtimeInstaller -KnownHostsPath $knownHosts -RestoreState
+& $runtimeInstaller -KnownHostsPath $knownHosts -RestoreState:(-not $RestoreRamState)
 if ($LASTEXITCODE -ne 0) { throw 'Codex RAM runtime restoration failed.' }
+
+if ($DevelopmentProfile -ne 'none') {
+    Write-Stage "RAM development tools: $DevelopmentProfile"
+    $installedLayer = & $developmentInstaller -Profile $DevelopmentProfile -KnownHostsPath $knownHosts -SshKeyPath $sshKey -EnableZram:$EnableZram
+    if ($installedLayer.BundleSha256 -ne $preparedLayer.BundleSha256) {
+        throw 'The prepared tool layer changed during deployment; state restoration was stopped.'
+    }
+}
+if ($RestoreRamState) {
+    Write-Stage 'Restore the verified Windows-hosted RAM snapshot'
+    & $ramStateRestorer -StateDirectory $RamStateDirectory -PayloadPath $payload `
+        -RuntimePath $preparedLayer.BundlePath -SshKeyPath $sshKey -KnownHostsPath $knownHosts
+}
 
 Write-Host "`nA1625 RAM Linux and Codex are restored." -ForegroundColor Green
 Write-Host "Per-boot known_hosts: $knownHosts"

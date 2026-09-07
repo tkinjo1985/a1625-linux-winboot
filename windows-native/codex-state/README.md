@@ -34,7 +34,8 @@ The encrypted file is usable only by the same Windows user on the same Windows
 installation. Keep the Windows volume protected with BitLocker and do not copy
 the state file as a general-purpose credential backup.
 
-This preserves authentication and configuration needed to log in. Source code
-and working files should remain in a Windows Git repository and be transferred
-to a fresh RAM work directory when needed; automatic reverse extraction of an
-Apple-TV-generated archive is deliberately not enabled.
+This older helper preserves authentication only. For working files and selected
+Git, SSH-client, and Codex settings, use the optional
+[RAM state snapshot tools](../ram-state/README.md). They validate archives in
+memory and encrypt them with DPAPI; they never extract device archives onto
+the Windows filesystem.

@@ -1,12 +1,16 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('172.16.42.1')]
     [string]$AppleTvAddress = '172.16.42.1',
+    [ValidateSet('172.16.42.2')]
     [string]$HostAddress = '172.16.42.2',
+    [ValidateRange(1024, 65535)]
     [int]$HttpPort = 8081,
     [string]$SshKeyPath = (Join-Path $PSScriptRoot '..\..\artifacts\ssh\a1625_ram_ed25519'),
     [string]$KnownHostsPath = (Join-Path $PSScriptRoot '..\..\artifacts\ssh\known_hosts_minimal_boot_20260902'),
     [switch]$RestoreState,
-    [switch]$Login
+    [switch]$Login,
+    [switch]$PrepareOnly
 )
 
 Set-StrictMode -Version Latest
@@ -48,7 +52,7 @@ foreach ($tool in 'ssh.exe', 'python.exe', 'tar.exe') {
         throw "Required host tool was not found: $tool"
     }
 }
-foreach ($path in $SshKeyPath, $KnownHostsPath) {
+foreach ($path in $(if ($PrepareOnly) { @() } else { @($SshKeyPath, $KnownHostsPath) })) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required file was not found: $path"
     }
@@ -81,6 +85,11 @@ if (-not (Test-Path -LiteralPath $caBundle -PathType Leaf)) {
 
 $launcherSource = Join-Path $PSScriptRoot 'codex-ram'
 Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $artifactRoot 'codex-ram') -Force
+$launcherHash = (Get-FileHash -LiteralPath $launcherSource -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($PrepareOnly) {
+    [pscustomobject]@{ Release = $release; ArtifactRoot = $artifactRoot; LauncherSha256 = $launcherHash }
+    return
+}
 
 $sshOptions = @(
     '-i', [IO.Path]::GetFullPath($SshKeyPath),
@@ -94,6 +103,12 @@ $remoteInstall = @'
 set -eu
 grep -q ' / rootfs ' /proc/mounts
 test "$(uname -m)" = aarch64
+grep -q '^KernelPageSize:[[:space:]]*4 kB$' /proc/self/smaps
+awk 'NR > 1 && $1 ~ /^[0-9]+$/ && $4 !~ /^zram[0-9]+$/ { found=1 } END { exit found }' /proc/partitions
+test ! -L /opt
+test ! -L /opt/bin
+test ! -L /run/codex-home
+test ! -L /run/work
 ntpd -n -q -p time.cloudflare.com
 mkdir -p /opt/bin /etc/ssl/certs /run/codex-home /run/work
 chmod 0700 /run/codex-home
@@ -116,13 +131,14 @@ wget -q -O /etc/ssl/certs/ca-certificates.crt http://__HOST__:__PORT__/ca-extrac
 echo 'b8d837841b88bfaa1a0fa827cbca8e2576418dd47c9fc4bb7f1f9d89c83111b9  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c -
 ln -sf certs/ca-certificates.crt /etc/ssl/cert.pem
 wget -q -O /opt/bin/codex-ram http://__HOST__:__PORT__/codex-ram
+echo '__LAUNCHER_HASH__  /opt/bin/codex-ram' | sha256sum -c -
 chmod 0755 /opt/bin/codex /opt/bin/codex-code-mode-host /opt/bin/bwrap /opt/bin/codex-ram
 ln -sfn /opt/bin/codex-ram /usr/bin/codex
 /opt/bin/codex-ram --version
 /opt/bin/bwrap --version
 free -m
 '@
-$remoteInstall = $remoteInstall.Replace('__HOST__', $HostAddress).Replace('__PORT__', [string]$HttpPort)
+$remoteInstall = $remoteInstall.Replace('__HOST__', $HostAddress).Replace('__PORT__', [string]$HttpPort).Replace('__LAUNCHER_HASH__', $launcherHash)
 
 $server = $null
 try {

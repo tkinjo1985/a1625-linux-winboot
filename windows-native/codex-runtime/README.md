@@ -64,6 +64,7 @@ runtime and login both need the Windows NAT route to the Internet.
 
 The A1625 has about 2 GiB RAM. This runtime leaves roughly 1.4 GiB available
 in the validated minimal boot, but large repositories, many subagents, or
-memory-heavy build tools can still exhaust RAM. Git is not included yet; use
-`--skip-git-repo-check` for scratch work until a separately verified RAM-only
-Git bundle is added.
+memory-heavy build tools can still exhaust RAM. The optional
+[development tool layer](../development-tools/README.md) adds Git and an SSH
+client, with C/C++ tools in its development profile. Its zram option caps
+compressed allocation at 256 MiB and never configures a backing device.

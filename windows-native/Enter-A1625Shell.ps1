@@ -35,7 +35,7 @@ $sshArguments = @(
 )
 
 Write-Host "Opening PTY shell on root@$AppleTvAddress. Type 'codex' to start Codex; use 'exit' to disconnect."
-& ssh.exe @sshArguments "root@$AppleTvAddress" 'export TERM=xterm-256color; exec /bin/sh -i'
+& ssh.exe @sshArguments "root@$AppleTvAddress" 'export TERM=xterm-256color HOME=/run/codex-home PATH=/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin; cd /run/work; exec /bin/sh -i'
 if ($LASTEXITCODE -ne 0) {
     throw "A1625 interactive SSH session ended with exit code $LASTEXITCODE."
 }

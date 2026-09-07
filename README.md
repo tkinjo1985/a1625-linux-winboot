@@ -101,6 +101,26 @@ credentials are never written to the repository. See
 
 ## One-command RAM environment restore
 
+Git, OpenSSH client, and optional native C/C++ development tools can be added
+as a verified RAM layer. Windows-hosted encrypted snapshots preserve selected
+configuration and `/run/work` across boots. See
+[RAM development tools](windows-native/development-tools/README.md) and
+[RAM state snapshots](windows-native/ram-state/README.md).
+
+```powershell
+# Prepare the selected layer without communicating with the Apple TV:
+& .\windows-native\development-tools\Install-A1625DevelopmentTools.ps1 -Profile development -PrepareOnly
+
+# After saving a matching RAM snapshot, restore it with the selected layer:
+& .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
+  -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell
+```
+
+`minimal` adds Git and the SSH client; `development` also adds GCC/G++, make,
+and pkg-config. Omitting `-DevelopmentProfile` preserves the base Codex-only
+workflow. Snapshot compatibility and all selected package hashes are checked
+before the boot stages. The base kernel continues to use 4 KiB pages.
+
 After a reboot, put the owned A1625 into DFU and run PowerShell as
 Administrator:
 

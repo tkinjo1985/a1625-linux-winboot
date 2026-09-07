@@ -17,6 +17,8 @@ function Get-A1625SshArguments {
         '-i', [IO.Path]::GetFullPath($SshKeyPath),
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
+        '-o', 'ServerAliveInterval=5',
+        '-o', 'ServerAliveCountMax=3',
         '-o', 'StrictHostKeyChecking=yes',
         '-o', ('UserKnownHostsFile=' + [IO.Path]::GetFullPath($KnownHostsPath))
     )
@@ -26,7 +28,9 @@ function Invoke-A1625SshDownload {
     param(
         [Parameter(Mandatory)] [string[]]$SshArguments,
         [Parameter(Mandatory)] [string]$AppleTvAddress,
-        [Parameter(Mandatory)] [string]$RemoteCommand
+        [Parameter(Mandatory)] [string]$RemoteCommand,
+        [ValidateRange(1, 600)] [int]$TimeoutSeconds = 180,
+        [ValidateRange(1024, 268435456)] [long]$MaxBytes = 268435456
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -45,8 +49,16 @@ function Invoke-A1625SshDownload {
         if (-not $process.Start()) { throw 'Failed to start ssh.exe' }
         $copyTask = $process.StandardOutput.BaseStream.CopyToAsync($output)
         $errorTask = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        while (-not $process.WaitForExit(100)) {
+            if ($output.Length -gt $MaxBytes -or $copyTask.IsFaulted -or [DateTime]::UtcNow -gt $deadline) {
+                $process.Kill($true)
+                [void]$process.WaitForExit(5000)
+                throw 'SSH download exceeded its size/time limit or the output stream failed.'
+            }
+        }
         [void]$copyTask.GetAwaiter().GetResult()
+        if ($output.Length -gt $MaxBytes) { throw 'SSH download exceeded its size limit.' }
         $stderr = $errorTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
             throw "SSH download failed with exit code $($process.ExitCode): $stderr"
@@ -64,7 +76,8 @@ function Invoke-A1625SshUpload {
         [Parameter(Mandatory)] [string[]]$SshArguments,
         [Parameter(Mandatory)] [string]$AppleTvAddress,
         [Parameter(Mandatory)] [string]$RemoteCommand,
-        [Parameter(Mandatory)] [byte[]]$Payload
+        [Parameter(Mandatory)] [byte[]]$Payload,
+        [ValidateRange(1, 600)] [int]$TimeoutSeconds = 180
     )
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -83,10 +96,19 @@ function Invoke-A1625SshUpload {
         if (-not $process.Start()) { throw 'Failed to start ssh.exe' }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        $process.StandardInput.BaseStream.Write($Payload, 0, $Payload.Length)
-        $process.StandardInput.BaseStream.Flush()
+        $writeTask = $process.StandardInput.BaseStream.WriteAsync($Payload, 0, $Payload.Length)
+        if (-not $writeTask.Wait($TimeoutSeconds * 1000)) {
+            $process.Kill($true)
+            [void]$process.WaitForExit(5000)
+            throw 'SSH upload timed out while writing.'
+        }
+        [void]$writeTask.GetAwaiter().GetResult()
         $process.StandardInput.Close()
-        $process.WaitForExit()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $process.Kill($true)
+            [void]$process.WaitForExit(5000)
+            throw 'SSH upload timed out waiting for the remote command.'
+        }
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
@@ -103,9 +125,10 @@ function Set-A1625StateDirectoryAcl {
     param([Parameter(Mandatory)] [string]$Path)
 
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
-    $acl = Get-Acl -LiteralPath $Path
+    # Build only a DACL: copying an existing security descriptor can carry a
+    # SACL and make repeat saves require the unrelated SeSecurityPrivilege.
+    $acl = [Security.AccessControl.DirectorySecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
-    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
     $identities = @(
         [Security.Principal.WindowsIdentity]::GetCurrent().User,
         [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
@@ -121,7 +144,7 @@ function Set-A1625StateDirectoryAcl {
         )
         [void]$acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $Path -AclObject $acl
+    [IO.FileSystemAclExtensions]::SetAccessControl([IO.DirectoryInfo]::new([IO.Path]::GetFullPath($Path)), $acl)
 }
 
 function Write-A1625AtomicBytes {

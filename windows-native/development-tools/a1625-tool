@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+TOOLROOT=/run/a1625-tools/root
+tool=${0##*/}
+export LD_LIBRARY_PATH="$TOOLROOT/usr/lib:$TOOLROOT/lib"
+export PATH="/opt/bin:$TOOLROOT/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export HOME=/run/codex-home
+export SSL_CERT_FILE="$TOOLROOT/etc/ssl/certs/ca-certificates.crt"
+export PKG_CONFIG_SYSROOT_DIR="$TOOLROOT"
+export PKG_CONFIG_LIBDIR="$TOOLROOT/usr/lib/pkgconfig:$TOOLROOT/usr/share/pkgconfig"
+case "$tool" in
+    cc|gcc|c++|g++|cpp)
+        export COMPILER_PATH="$TOOLROOT/usr/libexec/gcc/aarch64-alpine-linux-musl/15.2.0:$TOOLROOT/usr/bin"
+        export LIBRARY_PATH="$TOOLROOT/usr/lib:$TOOLROOT/lib"
+        exec "$TOOLROOT/usr/bin/$tool" --sysroot="$TOOLROOT" -B"$TOOLROOT/usr/lib/" "$@"
+        ;;
+    ssh|ssh-keygen|scp|sftp|make|pkgconf|pkg-config|ar|as|ld|nm|ranlib|strip|objcopy|objdump|size|strings|file|patch)
+        exec "$TOOLROOT/usr/bin/$tool" "$@"
+        ;;
+    *) echo "Unsupported A1625 tool: $tool" >&2; exit 64 ;;
+esac

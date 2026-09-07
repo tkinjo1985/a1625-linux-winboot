@@ -1,5 +1,19 @@
 # a1625-linux-winboot
 
+Git・OpenSSHクライアントと、任意のC/C++開発ツールをRAM上へ追加できるようになりました。
+`/run/work` と選択した設定はWindows側にDPAPI暗号化して保存・復元します。
+使い方と検証範囲は [開発ツール](windows-native/development-tools/README.md) と
+[RAM状態保存](windows-native/ram-state/README.md) を参照してください。
+
+```powershell
+# 保存済みスナップショットと同じ構成で復元
+& .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
+  -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell
+```
+
+`minimal` はGitとSSHクライアント、`development` はGCC/G++・make・pkg-configも含みます。
+`-DevelopmentProfile` を省略した場合は従来のCodex用最小環境です。
+
 [English README](README.md)
 
 このワークスペースには、Apple TV HD（A1625 / Apple A8）向けの、安全性を最優先し実機で検証したネイティブ Windows のブートパスが含まれています。
