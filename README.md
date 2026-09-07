@@ -111,6 +111,10 @@ configuration and `/run/work` across boots. See
 # Prepare the selected layer without communicating with the Apple TV:
 & .\windows-native\development-tools\Install-A1625DevelopmentTools.ps1 -Profile development -PrepareOnly
 
+# First boot with development tools, before a snapshot exists:
+& .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
+  -DevelopmentProfile development -EnableZram -EnterShell
+
 # After saving a matching RAM snapshot, restore it with the selected layer:
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell
@@ -121,8 +125,23 @@ and pkg-config. Omitting `-DevelopmentProfile` preserves the base Codex-only
 workflow. Snapshot compatibility and all selected package hashes are checked
 before the boot stages. The base kernel continues to use 4 KiB pages.
 
-After a reboot, put the owned A1625 into DFU and run PowerShell as
-Administrator:
+Use PowerShell 7 (`pwsh`) for device configuration, environment restoration,
+development tools, and RAM-state commands shown here.
+After working in `/run/work`, stop editing and save with the commands in
+[RAM state snapshots](windows-native/ram-state/README.md#save-and-restore)
+before powering off. Snapshots are not saved automatically. They are stored in
+`%LOCALAPPDATA%\AppleTvA1625\ram-state`, separately from the authentication-only
+cache described above. Changing the selected base or tool layer requires a
+new compatible snapshot. `-EnableZram` is optional and keeps swap entirely in RAM.
+
+Git, C/C++ tools, bounded zram pageout, and restoration after a physical power
+cycle were verified on 2026-09-07. See the
+[validation report](windows-native/VALIDATION-ISSUES-3-4.md) for measurements
+and test limits; state-restore timing does not include the complete boot.
+
+After a reboot, put the owned A1625 into DFU. Administrator rights are required
+when USB NCM addressing or Windows NAT must be configured; an existing valid
+configuration can be reused without elevation:
 
 ```powershell
 # One-time private device setup (use the ECID shown by diagnose/DFU output):
@@ -140,6 +159,10 @@ DPAPI-protected login state. It pauses when Zadig must be used for the exact
 displayed `05AC:1227` or `05AC:4141` instance; it never changes a driver
 itself. Add `-StartCodex` to launch Codex after a successful restore.
 
+Clean DFU and post-checkm8 YOLO DFU can enumerate as separate driver instances.
+See [driver rollback](windows-native/DRIVER-ROLLBACK.md) before changing the
+displayed instance in Zadig.
+
 To open an interactive PTY-backed SSH shell after recovery, run:
 
 ```powershell
@@ -154,8 +177,8 @@ command:
 ```
 
 The wrapper selects the newest per-boot host-key file, keeps strict host-key
-checking enabled, and uses `ssh -tt`. Inside that shell, typing `codex` starts
-the interactive Codex UI. Do not use `ssh -T` for an interactive session;
+checking enabled, and uses `ssh -tt`. Inside that shell, typing `codex-ram` starts
+the interactive Codex UI using the saved/restored `/run/codex-home`. Do not use `ssh -T` for an interactive session;
 `-T` deliberately disables terminal allocation.
 
 This command contains no internal-storage, partition, NVRAM, tvOS, or

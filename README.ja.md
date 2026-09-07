@@ -6,6 +6,10 @@ Git・OpenSSHクライアントと、任意のC/C++開発ツールをRAM上へ�
 [RAM状態保存](windows-native/ram-state/README.md) を参照してください。
 
 ```powershell
+# スナップショットがまだない初回起動
+& .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
+  -DevelopmentProfile development -EnableZram -EnterShell
+
 # 保存済みスナップショットと同じ構成で復元
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell
@@ -13,6 +17,15 @@ Git・OpenSSHクライアントと、任意のC/C++開発ツールをRAM上へ�
 
 `minimal` はGitとSSHクライアント、`development` はGCC/G++・make・pkg-configも含みます。
 `-DevelopmentProfile` を省略した場合は従来のCodex用最小環境です。
+
+ここで案内するデバイス設定、環境復元、開発ツール、RAM状態保存のコマンドはPowerShell 7（`pwsh`）で実行してください。
+`/run/work`での作業後は編集を止め、電源を切る前に[保存手順](windows-native/ram-state/README.md#save-and-restore)を実行します。
+状態は自動保存されません。保存先は `%LOCALAPPDATA%\AppleTvA1625\ram-state` で、後述の認証専用キャッシュとは別です。
+ベースやツール構成を変更した場合は、対応するスナップショットを新しく保存してください。
+`-EnableZram`は任意で、swapもRAM内だけに置きます。
+
+2026-09-07にGit、C/C++開発ツール、限定的なzram pageout試験、電源再投入後の状態復元を検証しました。
+測定値と検証範囲は[実機検証記録](windows-native/VALIDATION-ISSUES-3-4.md)を参照してください。状態復元時間は起動全体の時間ではありません。
 
 [English README](README.md)
 
@@ -94,7 +107,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows-native\tests\AtvNa
 
 ## 1 コマンドでの RAM 環境復元
 
-再起動後、所有する A1625 を DFU モードにし、PowerShell を管理者として実行します。
+再起動後、所有する A1625 を DFU モードにします。USB NCMのIPアドレスやWindows NATを設定する場合は管理者権限が必要です。既存の有効な設定を再利用する場合は昇格不要です。
 
 ```powershell
 # 初回のみの非公開デバイス設定（diagnose/DFU 出力に表示される ECID を使用）:
@@ -105,6 +118,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows-native\tests\AtvNa
 ```
 
 このスクリプトは、正確な A1625/T7000 成果物ハッシュ、カーネルのページサイズ構成、および ECID を検証します。その後は一時的な DFU/PongoOS/RAM ブートチェーンのみを実行し、USB NCM と Windows NAT を復元し、USB ACM 経由で新しい Dropbear 公開ホスト鍵を取得して、Codex ランタイムと DPAPI 保護済みログイン状態を復元します。Zadig を表示された正確な `05AC:1227` または `05AC:4141` インスタンスに使用する必要がある場合は一時停止します。ドライバー自体を変更することはありません。復元の成功後に Codex を起動するには `-StartCodex` を追加します。
+
+通常のDFUとcheckm8後のYOLO DFUが別のドライバーインスタンスとして認識されることがあります。Zadigで表示された個体のドライバーを変更する前に、[戻し方](windows-native/DRIVER-ROLLBACK.md)を確認してください。
 
 復旧後に PTY を割り当てた対話的 SSH シェルを開くには、次を実行します。
 
@@ -118,7 +133,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\windows-native\tests\AtvNa
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot -EnterShell
 ```
 
-このラッパーはブートごとの最新のホスト鍵ファイルを選択し、厳格なホスト鍵検証を有効に保ったまま `ssh -tt` を使用します。このシェル内で `codex` と入力すると、対話的な Codex UI が起動します。対話的なセッションには `ssh -T` を使用しないでください。`-T` は意図的に端末割り当てを無効にします。
+このラッパーはブートごとの最新のホスト鍵ファイルを選択し、厳格なホスト鍵検証を有効に保ったまま `ssh -tt` を使用します。このシェル内で `codex-ram` と入力すると、保存・復元対象の `/run/codex-home` を使って対話的な Codex UI が起動します。対話的なセッションには `ssh -T` を使用しないでください。`-T` は意図的に端末割り当てを無効にします。
 
 このコマンドには、内部ストレージ、パーティション、NVRAM、tvOS、または palera1n fakefs の操作は含まれません。Linux ペイロードおよび Codex のインストール先は RAM のままで、再起動すると消去されます。
 

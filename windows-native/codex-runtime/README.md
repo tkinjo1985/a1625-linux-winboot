@@ -14,7 +14,7 @@ The script pins and verifies every downloaded archive by SHA-256 before it is
 served over the private USB NCM link. It also verifies each archive again on
 the Apple TV before extraction.
 
-From an elevated PowerShell session with the RAM-only Linux, USB NCM NAT, and
+From a PowerShell 7 session with the RAM-only Linux, USB NCM NAT, and
 SSH already working:
 
 ```powershell
