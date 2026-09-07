@@ -4,7 +4,7 @@ param([string]$StateDirectory=(Join-Path $env:LOCALAPPDATA 'AppleTvA1625\ram-sta
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'A1625RamState.psm1') -Force
-$StateDirectory=[IO.Path]::GetFullPath($StateDirectory)
+$StateDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($StateDirectory)
 Set-A1625StateDirectoryAcl -Path $StateDirectory
 $sshArguments=Get-A1625SshArguments -SshKeyPath $SshKeyPath -KnownHostsPath $KnownHostsPath
 Test-A1625RamTarget -SshArguments $sshArguments -AppleTvAddress $AppleTvAddress -RuntimePath $RuntimePath

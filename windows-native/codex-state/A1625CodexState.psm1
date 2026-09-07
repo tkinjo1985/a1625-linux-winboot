@@ -14,13 +14,13 @@ function Get-A1625SshArguments {
     }
     @(
         '-T',
-        '-i', [IO.Path]::GetFullPath($SshKeyPath),
+        '-i', (Resolve-Path -LiteralPath $SshKeyPath).ProviderPath,
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
         '-o', 'ServerAliveInterval=5',
         '-o', 'ServerAliveCountMax=3',
         '-o', 'StrictHostKeyChecking=yes',
-        '-o', ('UserKnownHostsFile=' + [IO.Path]::GetFullPath($KnownHostsPath))
+        '-o', ('UserKnownHostsFile=' + (Resolve-Path -LiteralPath $KnownHostsPath).ProviderPath)
     )
 }
 

@@ -4,7 +4,7 @@ param([string]$StateDirectory=(Join-Path $env:LOCALAPPDATA 'AppleTvA1625\ram-sta
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $PSScriptRoot 'A1625RamState.psm1') -Force
-$StateDirectory=[IO.Path]::GetFullPath($StateDirectory);$name=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path $StateDirectory 'current'))).Trim()
+$StateDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($StateDirectory);$name=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes((Join-Path $StateDirectory 'current'))).Trim()
 if($name -notmatch '^state-([A-F0-9]{32})\.dpapi$'){throw 'Invalid snapshot generation pointer.'};$prefix=$Matches[1];$cipherPath=Join-Path $StateDirectory $name
 if(-not(Test-Path $cipherPath -PathType Leaf) -or (Get-Item $cipherPath).Length -gt 400MB){throw 'Selected encrypted snapshot is missing or exceeds 400 MiB.'}
 $cipher=$null;$plain=$null;$archive=$null
