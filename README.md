@@ -115,6 +115,9 @@ configuration and `/run/work` across boots. See
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -EnterShell
 
+# Stop work and save RAM state to Windows before powering off:
+& .\windows-native\Save-A1625RamEnvironment.ps1
+
 # After saving a matching RAM snapshot, restore it with the selected layer:
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell

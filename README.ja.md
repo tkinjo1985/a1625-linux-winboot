@@ -10,6 +10,9 @@ Git・OpenSSHクライアントと、任意のC/C++開発ツールをRAM上へ�
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -EnterShell
 
+# 作業を止めて、電源を切る前にRAM状態をWindowsへ保存
+& .\windows-native\Save-A1625RamEnvironment.ps1
+
 # 保存済みスナップショットと同じ構成で復元
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -RestoreRamState -EnterShell

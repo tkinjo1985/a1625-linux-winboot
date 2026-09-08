@@ -16,19 +16,21 @@ The default store is `%LOCALAPPDATA%\AppleTvA1625\ram-state` and uses a DACL
 restricted to the current user, Administrators, and SYSTEM.
 
 ```powershell
-$payload = '.\artifacts\hoolock\payload\m1n1-linux-a1625-minimal-ssh.bin'
-$layer = & .\windows-native\development-tools\Install-A1625DevelopmentTools.ps1 -Profile development -PrepareOnly
-$knownHosts = Get-ChildItem "$env:LOCALAPPDATA\AppleTvA1625\state\known_hosts_ram_*" |
-  Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1 -ExpandProperty FullName
-
-& .\windows-native\ram-state\Save-A1625RamState.ps1 `
-  -PayloadPath $payload -RuntimePath $layer.BundlePath `
-  -SshKeyPath .\artifacts\ssh\a1625_ram_ed25519 -KnownHostsPath $knownHosts
+& .\windows-native\Save-A1625RamEnvironment.ps1
 
 # After the next DFU boot, the wrapper validates the snapshot before USB writes:
 & .\windows-native\Restore-A1625RamEnvironment.ps1 -ConfirmRamBoot `
   -DevelopmentProfile development -EnableZram -RestoreRamState
 ```
+
+The save wrapper defaults to the `development` profile and the minimal SSH
+payload/key under `artifacts`. It prepares the tools bundle on Windows, selects
+the most recently modified `state\known_hosts_ram_*` file, then calls the existing
+snapshot saver with strict SSH host-key checking. A missing file or host-key
+mismatch stops the operation. Use `-KnownHostsPath` to select the verified file
+for the current boot explicitly, and `-DevelopmentProfile minimal` if that is
+the installed profile. `-PayloadPath`, `-SshKeyPath`, and `-StateDirectory` can
+also be overridden. Run with PowerShell 7 after stopping work on the device.
 
 The immutable base remains in Windows `artifacts`: the pinned gzip initramfs,
 combined payload, Codex archives, and selected tools bundle. Only mutable state
