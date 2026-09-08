@@ -27,15 +27,15 @@ foreach ($path in $SshKeyPath, $KnownHostsPath) {
 
 $sshArguments = @(
     '-tt',
-    '-i', [IO.Path]::GetFullPath($SshKeyPath),
+    '-i', (Resolve-Path -LiteralPath $SshKeyPath).ProviderPath,
     '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=5',
     '-o', 'StrictHostKeyChecking=yes',
-    '-o', ('UserKnownHostsFile=' + [IO.Path]::GetFullPath($KnownHostsPath))
+    '-o', ('UserKnownHostsFile=' + (Resolve-Path -LiteralPath $KnownHostsPath).ProviderPath)
 )
 
-Write-Host "Opening PTY shell on root@$AppleTvAddress. Type 'codex' to start Codex; use 'exit' to disconnect."
-& ssh.exe @sshArguments "root@$AppleTvAddress" 'export TERM=xterm-256color HOME=/run/codex-home PATH=/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin; cd /run/work; exec /bin/sh -i'
+Write-Host "Opening PTY shell on root@$AppleTvAddress. Type 'codex-ram' to start Codex; use 'exit' to disconnect."
+& ssh.exe @sshArguments "root@$AppleTvAddress" 'export TERM=xterm-256color HOME=/run/codex-home CODEX_HOME=/run/codex-home PATH=/opt/bin:/usr/bin:/bin:/usr/sbin:/sbin; cd /run/work; exec /bin/sh -i'
 if ($LASTEXITCODE -ne 0) {
     throw "A1625 interactive SSH session ended with exit code $LASTEXITCODE."
 }
