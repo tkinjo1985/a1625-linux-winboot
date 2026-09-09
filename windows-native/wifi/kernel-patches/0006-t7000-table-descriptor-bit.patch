@@ -1,0 +1,37 @@
+diff --git a/include/linux/io-pgtable.h b/include/linux/io-pgtable.h
+--- a/include/linux/io-pgtable.h
++++ b/include/linux/io-pgtable.h
+@@ -103,6 +103,8 @@ struct io_pgtable_cfg {
+ 	#define IO_PGTABLE_QUIRK_ARM_HD			BIT(7)
+ 	#define IO_PGTABLE_QUIRK_ARM_S2FWB		BIT(8)
+ 	#define IO_PGTABLE_QUIRK_NO_WARN		BIT(9)
++	/* T7000 DART requires bit 1 in non-leaf table descriptors. */
++	#define IO_PGTABLE_QUIRK_APPLE_T7000_TABLE	BIT(10)
+ 	unsigned long			quirks;
+ 	unsigned long			pgsize_bitmap;
+ 	unsigned int			ias;
+diff --git a/drivers/iommu/apple-dart.c b/drivers/iommu/apple-dart.c
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -720,6 +720,9 @@ static int apple_dart_finalize_domain(struct iommu_domain *domain,
+ 		.coherent_walk = 1,
+ 		.iommu_dev = dart->dev,
+ 	};
++	if (dart->hw->type == DART_S5L8960X &&
++	    of_device_is_compatible(dart->dev->of_node, "apple,t7000-dart"))
++		pgtbl_cfg.quirks |= IO_PGTABLE_QUIRK_APPLE_T7000_TABLE;
+ 
+ 	dart_domain->pgtbl_ops = alloc_io_pgtable_ops(dart->hw->fmt, &pgtbl_cfg,
+ 						      &dart_domain->domain);
+diff --git a/drivers/iommu/io-pgtable-dart.c b/drivers/iommu/io-pgtable-dart.c
+--- a/drivers/iommu/io-pgtable-dart.c
++++ b/drivers/iommu/io-pgtable-dart.c
+@@ -145,6 +145,8 @@ static dart_iopte dart_install_table(dart_iopte *table,
+ 	dart_iopte old, new;
+ 
+ 	new = paddr_to_iopte(__pa(table), data) | APPLE_DART_PTE_VALID;
++	if (data->iop.cfg.quirks & IO_PGTABLE_QUIRK_APPLE_T7000_TABLE)
++		new |= BIT(1);
+ 
+ 	/*
+ 	 * Ensure the table itself is visible before its PTE can be.

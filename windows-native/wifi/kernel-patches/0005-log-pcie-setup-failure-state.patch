@@ -1,0 +1,29 @@
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/pcie.c
+@@ -2378,5 +2378,25 @@
+ fail:
+ 	brcmf_err(bus, "Dongle setup failed\n");
++	/* Diagnostic metadata only, while setup still owns devinfo and rings.
++	 * Never log packet contents, calibration or interface addresses.
++	 */
++	if (devinfo->irq_allocated && devinfo->reginfo) {
++		unsigned int i;
++
++		brcmf_err(bus, "setup state: irq=%u mailbox=%08x mask=%08x flags=%08x dma_idx=%u\n",
++			  devinfo->pdev->irq,
++			  brcmf_pcie_read_reg32(devinfo, devinfo->reginfo->mailboxint),
++			  brcmf_pcie_read_reg32(devinfo, devinfo->reginfo->mailboxmask),
++			  devinfo->shared.flags, devinfo->dma_idx_sz);
++		for (i = 0; i < BRCMF_NROF_COMMON_MSGRINGS; i++) {
++			struct brcmf_pcie_ringbuf *ring = devinfo->shared.commonrings[i];
++
++			if (ring && devinfo->read_ptr)
++				brcmf_err(bus, "setup ring=%u read=%u write=%u\n", i,
++					  devinfo->read_ptr(devinfo, ring->r_idx_addr),
++					  devinfo->read_ptr(devinfo, ring->w_idx_addr));
++		}
++	}
+ 	brcmf_pcie_bus_console_read(devinfo, true);
+ 	brcmf_fw_crashed(dev);
+ 	/* remove() may be waiting while holding the device lock. Signal before

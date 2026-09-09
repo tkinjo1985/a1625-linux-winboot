@@ -32,6 +32,11 @@ Git・OpenSSHクライアントと、任意のC/C++開発ツールをRAM上へ�
 
 [English README](README.md)
 
+内蔵Wi-Fi（Issue #2）は、所有するA1625でWPA2/AES接続、DHCP、DNS、
+証明書検証付きHTTPS、USB切断後のSSHまで確認できました。RAM上の接続手順と
+検証範囲は[Wi-Fi手順](windows-native/wifi/README.md)と
+[実機記録](windows-native/wifi/acceptance-2026-09-09.md)を参照してください。
+
 このワークスペースには、Apple TV HD（A1625 / Apple A8）向けの、安全性を最優先し実機で検証したネイティブ Windows のブートパスが含まれています。
 
 診断エントリーポイントは引き続き読み取り専用です。保護されたネイティブ checkm8/Pongo ビルド、PongoOS から m1n1 へのアップローダー、A8 向け 4 KiB ページカーネル、最小 initramfs、USB NCM ネットワーク、USB ACM リカバリーシェル、Dropbear SSH は、所有する A1625 で実行済みです。どのブートコンポーネントも内部ストレージをマウントまたは書き込みしません。

@@ -1,0 +1,19 @@
+diff --git a/drivers/pci/controller/Kconfig b/drivers/pci/controller/Kconfig
+index 2247709ef..0a5e584d0 100644
+--- a/drivers/pci/controller/Kconfig
++++ b/drivers/pci/controller/Kconfig
+@@ -36,9 +36,13 @@ config PCIE_ALTERA_MSI
+ 	  This MSI driver supports Altera MSI to GIC controller IP.
+ 
+ config PCIE_APPLE_MSI_DOORBELL_ADDR
+-	hex
++	hex "Apple PCIe MSI doorbell address" if EXPERT
+ 	default 0xfffff000
+ 	depends on PCIE_APPLE
++	help
++	  PCI bus address reserved by DART for MSI messages. This must match
++	  the host controller's MSI destination. Keep the default unless the
++	  target platform's firmware supplies a different address.
+ 
+ config PCIE_APPLE
+ 	tristate "Apple PCIe controller"

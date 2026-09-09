@@ -4,6 +4,9 @@
 param(
     [switch]$ConfirmRamBoot,
 
+    [ValidateSet('baseline', 'wifi-experimental', 'wifi-fw-lifetime', 'wifi-fw-response', 'wifi-t7000-table', 'wifi-t7000-leaf')]
+    [string]$BootProfile = 'baseline',
+
     [ValidatePattern('^[0-9A-Fa-f]{16}$')]
     [string]$ExpectedEcid,
 
@@ -30,6 +33,37 @@ $uploader = Join-Path $repoRoot 'windows-native\pongo-uploader\target\release\at
 $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-minimal-ssh.bin'
 $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-minimal-ssh.manifest.json'
 $kernelConfig = Join-Path $repoRoot 'third_party\HoolockLinux-linux-native\.config'
+$expectedPayloadHash = '53DC73174456FB67951F60CA242DE04B8E1920C017829F7D8FF4E866B3769756'
+if ($BootProfile -eq 'wifi-experimental') {
+    $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-experimental.bin'
+    $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-experimental.manifest.json'
+    $kernelConfig = Join-Path $repoRoot 'artifacts\wifi-kernel-config\experimental-kernel\kernel.config'
+    $expectedPayloadHash = '7886737B66DA0276FBA66A1FD3CA2EE69BB3AAB3DE8F6080B6832659CA67F9F3'
+}
+if ($BootProfile -eq 'wifi-fw-lifetime') {
+    $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-fw-lifetime.bin'
+    $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-fw-lifetime.manifest.json'
+    $kernelConfig = Join-Path $repoRoot 'artifacts\wifi-kernel-config\fw-lifetime-kernel\kernel.config'
+    $expectedPayloadHash = 'A2D151944C1FA813D59D60861354C3B5294D8931FFA91D3B16525716495AFDAE'
+}
+if ($BootProfile -eq 'wifi-fw-response') {
+    $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-fw-response.bin'
+    $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-fw-response.manifest.json'
+    $kernelConfig = Join-Path $repoRoot 'artifacts\wifi-kernel-config\fw-response-kernel\kernel.config'
+    $expectedPayloadHash = '18F1EB8512DE9E1B09227079534EAF1E1DACFB34DB7105B79901964DEFBDBC2C'
+}
+if ($BootProfile -eq 'wifi-t7000-table') {
+    $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-t7000-table.bin'
+    $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-t7000-table.manifest.json'
+    $kernelConfig = Join-Path $repoRoot 'artifacts\wifi-kernel-config\t7000-table-kernel\kernel.config'
+    $expectedPayloadHash = '923A737232CA063E989484986C60F966758BDAC3C9C38C256374E5A600AF693E'
+}
+if ($BootProfile -eq 'wifi-t7000-leaf') {
+    $payload = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-t7000-leaf.bin'
+    $payloadManifest = Join-Path $repoRoot 'artifacts\hoolock\payload\m1n1-linux-a1625-wifi-t7000-leaf.manifest.json'
+    $kernelConfig = Join-Path $repoRoot 'artifacts\wifi-kernel-config\t7000-leaf-kernel\kernel.config'
+    $expectedPayloadHash = 'BC775028ABA05573AB2155CA399C5EC6C7E6F1DC42E5F3A97F3E37FFEF7D6AF1'
+}
 $sshKey = Join-Path $repoRoot 'artifacts\ssh\a1625_ram_ed25519'
 $atvModule = Join-Path $repoRoot 'windows-native\AtvNative.psm1'
 $runtimeInstaller = Join-Path $repoRoot 'windows-native\codex-runtime\Install-CodexRamRuntime.ps1'
@@ -77,7 +111,7 @@ function Assert-LocalPreflight {
     Assert-FileHash $openra1n 'ACB926409898C89DE9051268F5B1771C26F59E3A30FE25C34402EC3F880DF5AF'
     Assert-FileHash $libusb '39A8BE2A8C628C2A6146A3A1A85758A5F7FE44045FE425C9BF5897A11EA1B46C'
     Assert-FileHash $uploader 'CC015641D654339E8F93D4984A3165E43DA47681498004B333DE37720829CA6E'
-    Assert-FileHash $payload '53DC73174456FB67951F60CA242DE04B8E1920C017829F7D8FF4E866B3769756'
+    Assert-FileHash $payload $expectedPayloadHash
 
     foreach ($path in $payloadManifest, $kernelConfig, $sshKey, $atvModule, $runtimeInstaller, $codexStarter, $shellStarter) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -87,7 +121,7 @@ function Assert-LocalPreflight {
     $manifest = Get-Content -LiteralPath $payloadManifest -Raw | ConvertFrom-Json
     if ($manifest.target -ne 'Apple TV HD A1625 / AppleTV5,3 / J42d / T7000' -or
         $manifest.mode -ne 'RAM-only PongoOS m1n1 Linux boot' -or
-        $manifest.payload.sha256 -ne '53DC73174456FB67951F60CA242DE04B8E1920C017829F7D8FF4E866B3769756') {
+        $manifest.payload.sha256 -ne $expectedPayloadHash) {
         throw 'The Linux payload manifest is not the validated A1625/T7000 RAM-only manifest.'
     }
     if (-not (Select-String -LiteralPath $kernelConfig -SimpleMatch 'CONFIG_ARM64_4K_PAGES=y' -Quiet)) {
@@ -461,6 +495,9 @@ Write-Host 'Loaded the expected ECID from an explicit parameter or the private p
 
 Import-Module $atvModule -Force
 $linuxDevices = @(Get-ProductDetails '4142')
+if ($BootProfile -ne 'baseline' -and $linuxDevices.Count -ne 0) {
+    throw 'The experimental boot requires a fresh DFU/Pongo stage. Existing Linux was not replaced; enter DFU before retrying.'
+}
 if ($linuxDevices.Count -eq 0) {
     $pongoDevices = @(Get-ProductDetails '4141')
     if ($pongoDevices.Count -eq 0) {
@@ -468,10 +505,15 @@ if ($linuxDevices.Count -eq 0) {
         $dfu = Confirm-LibusbK '1227' 'A1625 DFU device'
         $isYolo = ([string]$dfu.InstanceId -match '(?i)YOLO:')
         if (-not $isYolo) {
+            $identityFailure = 'Failed to read DFU USB serial string descriptor|check callback rejected it'
             $phase1 = Invoke-BoundedProcess -FilePath $openra1n -ArgumentList @(
                 '--confirm-a1625', '--expected-ecid', $ExpectedEcid
-            ) -TimeoutSeconds $StageTimeoutSeconds -StopOnPattern 'TRIGGER_HANDOFF'
-            if (-not $phase1.Matched -or $phase1.Output -notmatch 'Stage 0 succeeded') {
+            ) -TimeoutSeconds $StageTimeoutSeconds -StopOnPattern "TRIGGER_HANDOFF|$identityFailure"
+            if ($phase1.Output -match $identityFailure) {
+                throw "DFU identity could not be verified during checkm8. Re-enter DFU before retrying. Logs: $($phase1.StdoutLog), $($phase1.StderrLog)"
+            }
+            if (-not $phase1.Matched -or $phase1.Output -notmatch 'TRIGGER_HANDOFF' -or
+                $phase1.Output -notmatch 'Stage 0 succeeded') {
                 throw "checkm8 did not reach the verified YOLO handoff. Logs: $($phase1.StdoutLog), $($phase1.StderrLog)"
             }
             Start-Sleep -Seconds 2

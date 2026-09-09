@@ -1,0 +1,17 @@
+diff --git a/drivers/iommu/io-pgtable-dart.c b/drivers/iommu/io-pgtable-dart.c
+--- a/drivers/iommu/io-pgtable-dart.c
++++ b/drivers/iommu/io-pgtable-dart.c
+@@ -125,8 +125,11 @@ static int dart_init_pte(struct dart_io_pgtable *data,
+ 		}
+ 
+ 	/* subpage protection: always allow access to the entire page */
+-	pte |= FIELD_PREP(APPLE_DART_PTE_SUBPAGE_START, 0);
+-	pte |= FIELD_PREP(APPLE_DART_PTE_SUBPAGE_END, 0xfff);
++	/* T7000 uses SP_DIS for a full page; its range fields differ. */
++	if (!(data->iop.cfg.quirks & IO_PGTABLE_QUIRK_APPLE_T7000_TABLE)) {
++		pte |= FIELD_PREP(APPLE_DART_PTE_SUBPAGE_START, 0);
++		pte |= FIELD_PREP(APPLE_DART_PTE_SUBPAGE_END, 0xfff);
++	}
+ 
+ 	pte |= APPLE_DART_PTE_VALID;
+ 

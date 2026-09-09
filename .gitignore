@@ -19,5 +19,10 @@
 *.log
 *.tmp
 *.bak
+__pycache__/
+# Wi-Fi profiles and private research inputs must never be committed.
+*.wifi.dpapi
+*.adt.bin
+wpa_supplicant.conf
 .idea/
 .vscode/

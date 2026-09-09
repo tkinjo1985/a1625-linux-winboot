@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/dts-v1/;
+/plugin/;
+
+/* J42d-only experimental overlay. Keep disabled until the host owns and
+ * enables all three PCIe power domains and the verified PHY sequence.
+ * Wi-Fi's ADT mapper-apcie1 uses stream 0: iommus = <&dart_apcie1 0>.
+ */
+/ {
+	compatible = "apple,j42d", "apple,t7000";
+
+	fragment@0 {
+		target-path = "/soc";
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <2>;
+
+			dart_apcie1: iommu@602002000 {
+				compatible = "apple,t7000-dart", "apple,s5l8960x-dart";
+				reg = <0x6 0x02002000 0x0 0x2000>;
+				interrupt-parent = <&aic>;
+				/* AIC_IRQ=0, IRQ_TYPE_LEVEL_HIGH=4. */
+				interrupts = <0 216 4>;
+				#iommu-cells = <1>;
+				status = "disabled";
+			};
+		};
+	};
+};

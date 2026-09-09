@@ -2,6 +2,8 @@
 param(
     [string]$BootArgs = 'hl_rd="shell" console=ttySAC6,115200n8 loglevel=7',
     [string]$InitramfsPath,
+    [string]$KernelPath,
+    [string]$DtbPath,
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$OutputName = 'm1n1-linux-a1625.bin'
 )
@@ -11,11 +13,17 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $InitramfsPath) {
     $InitramfsPath = Join-Path $repoRoot 'artifacts\hoolock\hoolockrd\initramfs.gz'
 }
+if (-not $KernelPath) {
+    $KernelPath = Join-Path $repoRoot 'third_party\HoolockLinux-linux-native\arch\arm64\boot\Image.gz'
+}
+if (-not $DtbPath) {
+    $DtbPath = Join-Path $repoRoot 'third_party\HoolockLinux-linux-native\arch\arm64\boot\dts\apple\t7000-j42d.dtb'
+}
 $parts = @(
     [ordered]@{ Name = 'm1n1'; Path = Join-Path $repoRoot 'artifacts\hoolock\m1n1\m1n1.bin' },
     [ordered]@{ Name = 'bootargs'; Bytes = [Text.Encoding]::ASCII.GetBytes("chosen.bootargs=$BootArgs`n") },
-    [ordered]@{ Name = 'dtb'; Path = Join-Path $repoRoot 'third_party\HoolockLinux-linux-native\arch\arm64\boot\dts\apple\t7000-j42d.dtb' },
-    [ordered]@{ Name = 'kernel'; Path = Join-Path $repoRoot 'third_party\HoolockLinux-linux-native\arch\arm64\boot\Image.gz' },
+    [ordered]@{ Name = 'dtb'; Path = $DtbPath },
+    [ordered]@{ Name = 'kernel'; Path = $KernelPath },
     [ordered]@{ Name = 'initramfs'; Path = $InitramfsPath }
 )
 

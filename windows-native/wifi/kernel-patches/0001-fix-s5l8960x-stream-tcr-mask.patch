@@ -1,0 +1,13 @@
+--- a/drivers/iommu/apple-dart.c
++++ b/drivers/iommu/apple-dart.c
+@@ -366,8 +366,8 @@
+ 	WARN_ON(sid >= 4);
+ 	u32 tcr = readl(dart->regs + dart->hw->tcr);
+ 
+-	tcr &= 0xff << (sid * DART_S5L8960X_TCR_BITS_PER_STREAM);
+-	tcr |= val;
++	tcr &= ~(0xffU << (sid * DART_S5L8960X_TCR_BITS_PER_STREAM));
++	tcr |= (val & 0xffU) << (sid * DART_S5L8960X_TCR_BITS_PER_STREAM);
+ 	writel(tcr, dart->regs + dart->hw->tcr);
+ }
+ 

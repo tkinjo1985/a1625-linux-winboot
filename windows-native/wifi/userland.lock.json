@@ -1,0 +1,146 @@
+{
+  "source": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/",
+  "architecture": "aarch64",
+  "index_sha256": "ba325a020db9bb220cf5a0a3edf49937f6ff704b4d8f3f822ce3d176bf367798",
+  "bundles": {
+    "wpa": {
+      "packages": [
+        {
+          "file": "libcrypto3-3.5.8-r0.apk",
+          "sha256": "2be40da5877bce1780361cb58cc499bc17b9d747c0286dccad46c026f48c95f8",
+          "index_control_hash": "Q1NqpCMuLCrNtmk8S8hQAc1KnPoOc=",
+          "datahash": "11ab3f8e69b142b1b32a250b20299ddefa44823b892d2e974b2a72ae2fcb30e3"
+        },
+        {
+          "file": "dbus-libs-1.16.2-r1.apk",
+          "sha256": "7d8f2b7bb25430d440d36ade181cd77d11e0ef4172a5a57e767985ca33670fb3",
+          "index_control_hash": "Q1m203YZUW1asWY7AwgyjaXqoa6/E=",
+          "datahash": "637134f919b2a4d04b09bb8cf00526739b0159bff2b738914517340910f4557e"
+        },
+        {
+          "file": "libnl3-3.11.0-r0.apk",
+          "sha256": "47bf42b751721d62447978b5486d1b675a56dbbe0e07b9bb66036eb3287323f7",
+          "index_control_hash": "Q1g6jJ78P7BJQKY80r4WMznojHi+g=",
+          "datahash": "d549fca7dda524dca67fa9d659409f66a48e5997ebb6623e493fc986d9706aec"
+        },
+        {
+          "file": "pcsc-lite-libs-2.4.0-r1.apk",
+          "sha256": "8b436b649abc801ff52c943d5248e1e4085599193c3340a458ff32417325bab4",
+          "index_control_hash": "Q1E7J7UUZi1AgmNCWQl9fjcu+6bvM=",
+          "datahash": "7c8101dde375e61890c7cc79d6529ab0a84ec5ba72e1f528747176b616e3f5b5"
+        },
+        {
+          "file": "libssl3-3.5.8-r0.apk",
+          "sha256": "77a8ef8f87a3fe6b621fd2c06bb983dea55013a3e67c60741df83f5221983247",
+          "index_control_hash": "Q1hx3hzCQRsEq2apjgQ+k/GK+X15s=",
+          "datahash": "38929853dfe0ab43d4ec5ed593bf41cf6d6e84e8f046fe90dbb2fb1bab782945"
+        },
+        {
+          "file": "wpa_supplicant-2.11-r3.apk",
+          "sha256": "aea1caa2a0bfd07314886ddfeb66d76daddce6af38b0baa17d1718d7596bb558",
+          "index_control_hash": "Q1+iwpqmv7ea3XuDR9y+qy9gYKJHQ=",
+          "datahash": "36be40bc183c622acbfd0c2a66bda74eb789856b6f405594978baf2a347fce2c"
+        }
+      ],
+      "bundle_sha256": "a565b169588d53287d6f285cdcca78a6f2f50296367799b047a9eae397187351"
+    },
+    "curl": {
+      "packages": [
+        {
+          "file": "ca-certificates-bundle-20260611-r0.apk",
+          "sha256": "9cc6938c1950bfa84d15aeb61bd6dee294b0b856804f36252796e340975c264e",
+          "index_control_hash": "Q1FvcpexzkFoAe8cDYS86ZMqsx85E=",
+          "datahash": "5b60787e8f6235e7fceb9df141c245634137e773c05bb54269a7baa39d2c36e3"
+        },
+        {
+          "file": "brotli-libs-1.2.0-r0.apk",
+          "sha256": "c8a9113b0007d40291e55cfc196744b64004253707e37b3c07e188166fb2d0a0",
+          "index_control_hash": "Q1xINQhhe1LrN7eWJvsXcdKlGTAB4=",
+          "datahash": "45df1f1b851aac263d83aa6dd9db98aea9c7eb0a7ceb4c58df0ab0fbb4cd36b7"
+        },
+        {
+          "file": "c-ares-1.34.8-r0.apk",
+          "sha256": "7468b8355eb7a54c2829ed3e72b61f49b2968c1dd0281e16ddf939fcf1c9e91b",
+          "index_control_hash": "Q1jRRSEaPS9oF3ZCgthkvhaNzZ15o=",
+          "datahash": "b2afcd1db369ab7dd12b0aa9daff8f35312fe35fa5e4ce67e5a8ba1ef196529b"
+        },
+        {
+          "file": "libcrypto3-3.5.8-r0.apk",
+          "sha256": "2be40da5877bce1780361cb58cc499bc17b9d747c0286dccad46c026f48c95f8",
+          "index_control_hash": "Q1NqpCMuLCrNtmk8S8hQAc1KnPoOc=",
+          "datahash": "11ab3f8e69b142b1b32a250b20299ddefa44823b892d2e974b2a72ae2fcb30e3"
+        },
+        {
+          "file": "libunistring-1.4.1-r0.apk",
+          "sha256": "03f26b1c897ad74af51b475d5f6cebad50efe90e4d42a0c38ffcb37859077481",
+          "index_control_hash": "Q1+QIasrJyZJgFbXN5NvFwwN3Eqs4=",
+          "datahash": "e9f30e0bfee98b563a1ed38c0aa3e1339b3baba9186ac04651e7498eac9c4859"
+        },
+        {
+          "file": "libidn2-2.3.8-r0.apk",
+          "sha256": "71db3591a2cb251aae463b966f9731c9ecae3bff4dccea552e0033002b92fd75",
+          "index_control_hash": "Q1MJLImG9EY3wBPfOSPjs6dMhyebs=",
+          "datahash": "12ce1250d9682143bcd5cffbe410bc8f828e80eb51f45434f76cedb7ca1f4185"
+        },
+        {
+          "file": "nghttp2-libs-1.69.0-r0.apk",
+          "sha256": "2e17aa1d7d4a37b2d029210d239b8b2e4ac40748d9a8c8912a6b607011034fd1",
+          "index_control_hash": "Q1birSZCXLHjellMlW0zNEGdnLbOM=",
+          "datahash": "13fac5a6fd6764da71955f47da802698ef58fa0f665466d7f7d8a9f0247533c6"
+        },
+        {
+          "file": "libpsl-0.21.5-r3.apk",
+          "sha256": "3078398181f0955da453826965a9e184494e4d9dfd22391e28d72f7561a0ca2b",
+          "index_control_hash": "Q1PgUUD9HUaWvKhtvZu4JRSWEgFZ0=",
+          "datahash": "b9acbc29fd64afe5eb2e76169e7462bfb6ec6b02f9e5185780a539d4e7c64579"
+        },
+        {
+          "file": "libssl3-3.5.8-r0.apk",
+          "sha256": "77a8ef8f87a3fe6b621fd2c06bb983dea55013a3e67c60741df83f5221983247",
+          "index_control_hash": "Q1hx3hzCQRsEq2apjgQ+k/GK+X15s=",
+          "datahash": "38929853dfe0ab43d4ec5ed593bf41cf6d6e84e8f046fe90dbb2fb1bab782945"
+        },
+        {
+          "file": "zlib-1.3.2-r0.apk",
+          "sha256": "ecda4cc94fd18f90182f1d3a615889df5e0db9cf78926d11627dd23e06d2e6e8",
+          "index_control_hash": "Q16KxKLHZrgH2jspuUJ44nsWpSfZk=",
+          "datahash": "39772dac3a266d4a827751b228f776088e28d87c97a67b12cf206f7ce33ccadb"
+        },
+        {
+          "file": "zstd-libs-1.5.7-r2.apk",
+          "sha256": "50a998e56e4bf31504996e49c1b4a23eed5e0cd4e24b8a1356a54daf1a6eabbe",
+          "index_control_hash": "Q1ppY2frZMXRXfIPzp1r0Fgwz3TnE=",
+          "datahash": "b51d6bdbc951bc00b477a2a10aa681164789e8a10019affdcc5ad78add13b1a2"
+        },
+        {
+          "file": "libcurl-8.22.0-r0.apk",
+          "sha256": "ef6b8fa24dcfeac950582c3f5702212c56cc40db5d09286d7dc3bdca1490151a",
+          "index_control_hash": "Q11q8gVcnbQH7TlVhjhXuxyjbPNz8=",
+          "datahash": "f4b12361eab876407df203e12ae1a0e5d8c5fd515e98eba95ce67018e1f2b6c7"
+        },
+        {
+          "file": "curl-8.22.0-r0.apk",
+          "sha256": "27674b4f5a4a9b51db6673bf7e75e247b51c711294a4fff638fe9a67ae21ed48",
+          "index_control_hash": "Q1rr2SElC+hw+bCo7kAV6ygfkRzcE=",
+          "datahash": "3442f9c834083b646898cb74a765464afb2a7f1876ac6fdc85fb85da0040e161"
+        }
+      ],
+      "bundle_sha256": "1c49da6321f167693a1c2c5593286798c49c891d180b21b048c03a2c120c0d1d"
+    },
+    "iw": {
+      "bundle_sha256": "a7d7898a67aee3d72a00c9858bbc9b2dd63033e73c2a39475e11290c1b2d27e4",
+      "packages": [
+        {
+          "sha256": "aa98f90f196d1dab15a749215bff4aed48b75c61bc64ff23495e8052979c32da",
+          "file": "iw-6.17-r0.apk"
+        },
+        {
+          "file": "libnl3-3.11.0-r0.apk",
+          "sha256": "47bf42b751721d62447978b5486d1b675a56dbbe0e07b9bb66036eb3287323f7",
+          "index_control_hash": "Q1g6jJ78P7BJQKY80r4WMznojHi+g=",
+          "datahash": "d549fca7dda524dca67fa9d659409f66a48e5997ebb6623e493fc986d9706aec"
+        }
+      ]
+    }
+  }
+}
