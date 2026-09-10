@@ -27,7 +27,9 @@ assert source.count('IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION') == 1
 assert 'request->SetupPacket.bmRequest = 0x80;' in source
 assert 'request->SetupPacket.bRequest = 0x06;' in source
 assert '(USB_STRING_DESCRIPTOR_TYPE << 8) | 4' in source
-assert 'request->SetupPacket.wLength = 12;' in source
+assert 'request->SetupPacket.wLength = 46;' in source
+assert 'text[3] != \'2\'' in source
+assert 'checksum != expected' in source
 for forbidden in ('SetCommState', 'WriteFile(', 'IOCTL_USB_RESET',
                   'IOCTL_USB_HUB_CYCLE_PORT', 'libusb_', 'P_NOP'):
     assert forbidden not in source
@@ -39,6 +41,8 @@ for required in ("InstanceId -eq $identity.instance_id", "-ne 'usbser'",
                  'Compare-Object $savedLocation $location -SyncWindow 0',
                  "throw 'Output directory already exists; no automatic repeat'",
                  '$record.attempts=1', '$process.WaitForExit(5000)',
+                 "[ValidateSet('Arm','Report')]", "throw 'Diagnostic arm was not confirmed'",
+                 "throw 'Report is stale, mismatched, or not frozen'",
                  'com_opens=0;proxy_requests=0;ans_requests=0;nand_requests=0'):
     assert required in wrapper
 assert wrapper.count('Start-Process -FilePath $reader') == 1
@@ -62,5 +66,8 @@ for marker in ('P0_EP0_SETUP_CONSUMED', 'P0_EP0_GET_HANDLER', 'P0_EP0_IN_ARMED',
                'P0_EP0_STATUS_COMPLETE', 'P0_EP0_NEXT_SETUP'):
     assert marker in patch
 assert 'u8 p0_ep0_trace;' in patch
+assert '#define P0_EP0_FREEZE_USEC 45000000' in patch
+assert 'P0_EP0_FROZEN' in patch and 'P0_EP0_RECONNECT_ATTEMPTED' in patch
+assert patch.count('p0_ep0_poll(dev);') >= 3
 
 print('EP0 trace helper, target gates, one-read policy and artifact hashes passed')

@@ -529,3 +529,160 @@ that exposes the frozen byte in an advertised descriptor. That is only a design
 candidate: its timing, controller-reset behavior, identity changes and safety
 gates require host-only review and tests before another hardware approval.
 No further hardware operation is authorized by this paragraph.
+
+## Session s preparation: armed one-shot EP0 report (not executed)
+
+This section is a host-only review and build result. Session r remains the last
+hardware evidence. No DFU transfer, COM open, USB request, disconnect or
+re-enumeration was performed while preparing this section.
+
+### Code review and viability conditions
+
+The candidate is viable only as a bounded P0 diagnostic, not as a guaranteed
+recovery facility. The exact GET path remains
+`usb_dwc2_handle_interrupts_ep` (SETUP after `dma_rmb`) ->
+`usb_dwc2_ep0_handle_setup` -> `usb_dwc2_ep0_handle_class` ->
+`usb_dwc2_ep0_start_data_send_phase` -> `usb_dwc2_ep_hw_send`; its IN
+completion runs through `usb_dwc2_ep0_handle_xfer_done`, which moves to
+`DATA_RECV_STATUS`, and `usb_dwc2_ep_hw_recv` arms the OUT status. The OUT
+completion starts the next setup phase.
+
+A. Arm is confirmed only by a successfully returned, checksum-valid `P0E2`
+index-4 descriptor with `VALID|ARMED`, a nonzero boot ID and generation 1. PnP
+enumeration alone is not arm evidence. If that read fails, COM must not open.
+
+B. The 45-second report deadline starts at arm and is independent of target
+GET recognition. Thus a valid frozen trace of zero distinguishes “armed but
+target SETUP not observed” from failure to arm.
+
+C. `usb_dwc2_handle_events` previously called an interrupt handler containing
+a `while (1)` loop, while reset-time `usb_dwc2_ep_abort` contained three
+unbounded waits. The P0 build now polls the deadline before and after the event
+call and at the top of every interrupt-loop iteration. The three abort waits
+are P0-only bounded to 10 ms and set `ABORT_TIMEOUT`. This still cannot report
+after CPU stop, failure to call the event loop, a hang inside another interrupt
+sub-handler/MMIO access, or power loss. Those outcomes remain UNKNOWN.
+
+D. At the deadline the seven-bit checkpoint byte is frozen. `P0_EP0_MARK`
+rejects later writes, and USB reset does not initialize diagnostic fields.
+Disconnect/reconnect/abort flags are monotonic report metadata; they do not
+alter the frozen GET checkpoint byte. A later SETUP or index-4 request therefore
+cannot be mistaken for progress of the original GET.
+
+E. The fixed 22-character record is `P0E2 + boot-id(8) + generation(4) +
+trace(2) + flags(2) + checksum(2)`. The host requires the report boot ID and
+generation to equal the saved arm record and validates its checksum. That
+prevents accepting an initial value, another boot or ordinary descriptor
+cache as this trial. The separately verified payload hash binds that boot to
+the reviewed build; embedding the payload hash in itself is intentionally not
+attempted.
+
+F. The one-shot transition uses only the existing DWC2 `DCTL.SftDisCon` bit,
+already used by `usb_dwc2_init` and `usb_dwc2_shutdown`: set once at freeze,
+clear once after 100 ms. It does not guess registers or perform a full
+controller reset. Normal host reset handling is reused with the P0 abort
+bounds above. There is no retry or recovery loop.
+
+G. Index 4 remains unadvertised before arm, preventing an automatic initial
+enumeration read from masquerading as the explicit arm. At freeze the code
+changes only `iConfiguration` from 0 to 4 before disconnect. Re-enumeration is
+expected to retain VID:PID 1209:316D, serial/InstanceId,
+parent hub, ordered location paths, `usbser` service and product prefix. The
+only intentional descriptor change from the previous diagnostic is P0
+configuration string index 4 being advertised. The host gate is not relaxed;
+any other identity/location change rejects the report.
+
+The report still depends on EP0 functioning after the reconnect attempt. A
+failed reconnect or report read is not converted to a checkpoint value. No
+UART, proxy or second host is assumed. This is materially different from the
+failed session-r post-failure read because arm and the autonomous deadline are
+established while EP0 is healthy, before COM.
+
+### Minimal difference and host-only verification
+
+`m1n1-p0.patch` adds P0-only fixed fields, guarded checkpoint ORs, the fixed
+descriptor, three deadline poll sites, one disconnect and one reconnect, and
+finite P0 abort waits. It adds no printf or dynamic allocation and makes no
+ANS/NAND change. `Read-Ep0Trace.c` parses and checks the P0E2 record.
+`Invoke-Ep0TraceRead.ps1` has explicit `Arm` and `Report` modes; Report requires
+the saved successful Arm session and exact boot/generation match. Both modes
+retain one request and a five-second process deadline, refuse output reuse and
+write the session JSON in `finally`, including on host failure.
+
+The full P0 payload build passed, with the pre-existing linker placement
+warning only. The executable CDC test still runs the current handler bodies.
+The new model/source-policy test covers normal `0x7f`, no SETUP `0x00`, handler
+only `0x03`, IN armed/no completion `0x07`, and status armed/no completion
+`0x1f`; it distinguishes unarmed from armed/unobserved, verifies freeze,
+single disconnect/reconnect, post-freeze non-destruction and reset-source
+non-initialization. Reader policy tests reject malformed/checksum-invalid,
+stale/mismatched/non-frozen reports and unexpected identity/location. They
+also verify zero COM/proxy/P_NOP/ANS/NAND operations in the reader. All three
+focused host tests pass. These tests do not prove device DMA timing, interrupt
+arrival, the 100-ms physical disconnect interval, Windows re-enumeration or
+post-disconnect EP0 recovery.
+
+Reviewed artifact hashes are:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `m1n1-p0.patch` | `BD9734C382F1339FDE61EF70A52FB1A179F2063491B823895ABC70F299A66BAC` |
+| `build/m1n1.bin` | `5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D` |
+| `Read-Ep0Trace.c` | `BEC6568062F8D2DDEA40CCACD9E9B62303D9BB189A20921D42233F132D6DB0FB` |
+| `Read-Ep0Trace.exe` | `26CEBECDAC9D93272A6A81C37E716D2CB0B364CB31B29D67A53FBF57C3D5F823` |
+| `Invoke-Ep0TraceRead.ps1` | `912915FBE933130363C7D317705CC7617AC693191F0A71911C335D53B533357B` |
+| `build-manifest.json` | `669AD4AE1A60D811547E6C2B81132A65EAF2DEC2CEA7CE4B94E1BE0A4BE4464D` |
+| `ep0-trace-reader-manifest.json` | `9BCA8D2468DABAE73A8132951FFF4F569C7FF6AE0A6E1679709224275D8F78B9` |
+
+### One future hardware trial (new approval required)
+
+Use a new, initially absent directory
+`artifacts/p0-usb/session-s-ep0-autoreport`. Reconfirm A1625/T7000 identity,
+ECID and physical location; Checkm8 and Pongo are one attempt each; transfer
+only the payload hash above once; then repeat exact identity/location and
+artifact gates. Start one continuous ETW trace before arm and retain host
+monotonic timestamps through final collection.
+
+Perform one Arm-mode index-4 read (5-second limit). Save its session JSON and
+raw stdout immediately. It must be P0E2, checksum-valid, VALID|ARMED, not
+FROZEN, nonzero boot ID, generation 1. Otherwise stop without COM. Start
+exactly one COM open within 5 seconds of arm completion. Do not issue a second
+COM open or the failed session-r post-failure reader. Record Windows/OS-issued
+URBs separately from tool-issued attempts: tool counters remain arm=1,
+COM-open=1, report=1 at most; repeated OS URBs are ETW observations, not
+authorized retries.
+
+The device freezes at arm+45 seconds, sets soft disconnect once and clears it
+after 100 ms once. The 45-second separation is deliberately later than session
+r's approximately 30-second GET completion. Record the GET submission and
+completion, disconnect, disappearance, reappearance and report-read timestamps
+so an URB cancelled by disconnect is not labeled as the original GET result.
+Wait no longer than 60 seconds from arm for the expected same-location device
+to reappear. Unexpected identity/location or no reappearance ends UNKNOWN.
+After reappearance perform exactly one Report-mode read (5-second limit),
+bound to the saved Arm JSON. No report, invalid checksum, non-frozen state or
+boot/generation mismatch ends UNKNOWN with logs retained; there is no reset,
+re-enumeration or read retry.
+
+Interpret the frozen checkpoint as follows; each bit proves only passage of
+its instrumented statement:
+
+| Frozen trace | Supported split | Still not established |
+| --- | --- | --- |
+| `0x00` | armed, but exact target SETUP was not observed | whether controller/DMA received it |
+| `0x01` | target SETUP observed after DMA barrier | entry into validated handler |
+| `0x03` | handler entered | EP0 IN programming |
+| `0x07` | seven-byte IN was programmed/enabled | host receipt or DMA/IRQ completion |
+| `0x0f` | IN completion handler ran | OUT status was armed |
+| `0x1f` | OUT status was armed | status completion |
+| `0x3f` | OUT status completion handler ran | subsequent SETUP; host success still needs ETW |
+| `0x7f` | subsequent SETUP was also observed before freeze | Windows COM configuration success |
+| other | instrumentation/state anomaly | normal prefix interpretation |
+
+`ABORT_TIMEOUT` describes reconnect/reset handling after freeze and does not
+change the GET trace. A valid current-trial record that advances this split is
+the diagnostic completion condition. It is not COM configuration or P_NOP
+success. Do not issue P_NOP in this autonomous-disconnect trial. In every
+outcome stop before ANS initialization and all NAND access. The trial is not
+authorized until its exact commands, current target state and hashes are shown
+and the user gives a new approval.

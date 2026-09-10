@@ -1,6 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$IdentityPath,
-    [Parameter(Mandatory=$true)][string]$OutputDirectory
+    [Parameter(Mandatory=$true)][string]$OutputDirectory,
+    [ValidateSet('Arm','Report')][string]$Mode='Arm',
+    [string]$ArmRecordPath
 )
 $ErrorActionPreference='Stop'
 if(Test-Path -LiteralPath $OutputDirectory){throw 'Output directory already exists; no automatic repeat'}
@@ -34,7 +36,7 @@ $outFull=[IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if(-not $outFull.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Output directory must stay inside repository'}
 New-Item -ItemType Directory -Path $outFull | Out-Null
 $stdout=Join-Path $outFull 'stdout.txt';$stderr=Join-Path $outFull 'stderr.txt'
-$record=[ordered]@{mode='P0-USB EP0 trace descriptor read';status='starting';attempts=0;
+$record=[ordered]@{mode=$Mode;status='starting';attempts=0;
     com_opens=0;proxy_requests=0;ans_requests=0;nand_requests=0;
     identity=$identity;live_location=$location;hub_instance=$identity.parent;connection_port=$port;
     hashes=@(Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath,$manifestPath,$source,$reader,$identityFull | Select-Object Path,Hash)}
@@ -52,7 +54,17 @@ try{
     $record.exit_code=$process.ExitCode
     if($process.ExitCode -ne 0){throw "EP0 trace reader failed: $($process.ExitCode)"}
     $result=Get-Content -LiteralPath $stdout -Raw | ConvertFrom-Json
-    if($result.trace -notmatch '^P0E[0-9A-F]{2}$' -or $result.raw -lt 0 -or $result.raw -gt 127){throw 'Malformed EP0 trace result'}
+    if($result.format -ne 'P0E2' -or $result.boot_id -eq 0 -or $result.generation -ne 1 -or
+       $result.trace -lt 0 -or $result.trace -gt 127){throw 'Malformed EP0 trace result'}
+    if($Mode -eq 'Arm'){
+        if(($result.flags -band 3) -ne 3 -or ($result.flags -band 4)){throw 'Diagnostic arm was not confirmed'}
+    }else{
+        if(-not $ArmRecordPath){throw 'Report mode requires ArmRecordPath'}
+        $arm=Get-Content -LiteralPath (Resolve-Path -LiteralPath $ArmRecordPath) -Raw | ConvertFrom-Json
+        if($arm.status -ne 'passed' -or $arm.mode -ne 'Arm' -or
+           $result.boot_id -ne $arm.trace.boot_id -or $result.generation -ne $arm.trace.generation -or
+           ($result.flags -band 4) -eq 0){throw 'Report is stale, mismatched, or not frozen'}
+    }
     $record.trace=$result
     $record.status='passed'
 }catch{$record.status='failed';$record.error=$_.Exception.Message}

@@ -11,6 +11,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static int hex_value(USHORT c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int parse_hex(const USHORT *text, int count, unsigned long *value)
+{
+    *value = 0;
+    for (int i = 0; i < count; i++) {
+        int digit = hex_value(text[i]);
+        if (digit < 0) return 0;
+        *value = (*value << 4) | (unsigned long)digit;
+    }
+    return 1;
+}
+
 static HANDLE open_hub(wchar_t *instance)
 {
     GUID hub = {0xf18a0e88,0xc30c,0x11d0,{0x88,0x15,0x00,0xa0,0xc9,0x06,0xbe,0xd8}};
@@ -67,7 +85,7 @@ int wmain(int argc, wchar_t **argv)
     request->SetupPacket.bRequest = 0x06;
     request->SetupPacket.wValue = (USB_STRING_DESCRIPTOR_TYPE << 8) | 4;
     request->SetupPacket.wIndex = 0x0409;
-    request->SetupPacket.wLength = 12;
+    request->SetupPacket.wLength = 46;
     ok = DeviceIoControl(hub, IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION,
                          request_buffer, sizeof(request_buffer), request_buffer,
                          sizeof(request_buffer), &returned, NULL);
@@ -77,18 +95,24 @@ int wmain(int argc, wchar_t **argv)
         fprintf(stderr, "descriptor request error %lu\n", error);
         return 5;
     }
-    if (returned < sizeof(*request) + 12 || request->Data[0] != 12 ||
+    if (returned < sizeof(*request) + 46 || request->Data[0] != 46 ||
         request->Data[1] != USB_STRING_DESCRIPTOR_TYPE)
         return 6;
     const USHORT *text = (const USHORT *)(request->Data + 2);
-    if (text[0] != 'P' || text[1] != '0' || text[2] != 'E')
+    if (text[0] != 'P' || text[1] != '0' || text[2] != 'E' || text[3] != '2')
         return 7;
-    if (!((text[3] >= '0' && text[3] <= '9') || (text[3] >= 'A' && text[3] <= 'F')) ||
-        !((text[4] >= '0' && text[4] <= '9') || (text[4] >= 'A' && text[4] <= 'F')))
+    unsigned long boot, generation, trace, flags, checksum;
+    if (!parse_hex(text + 4, 8, &boot) || !parse_hex(text + 12, 4, &generation) ||
+        !parse_hex(text + 16, 2, &trace) || !parse_hex(text + 18, 2, &flags) ||
+        !parse_hex(text + 20, 2, &checksum))
         return 7;
-    printf("{\"trace\":\"%c%c%c%c%c\",\"raw\":%u}\n",
-           (char)text[0], (char)text[1], (char)text[2], (char)text[3], (char)text[4],
-           (unsigned)((text[3] <= '9' ? text[3] - '0' : text[3] - 'A' + 10) << 4) |
-           (unsigned)(text[4] <= '9' ? text[4] - '0' : text[4] - 'A' + 10));
+    unsigned char expected = (unsigned char)boot ^ (unsigned char)(boot >> 8) ^
+        (unsigned char)(boot >> 16) ^ (unsigned char)(boot >> 24) ^
+        (unsigned char)generation ^ (unsigned char)(generation >> 8) ^
+        (unsigned char)trace ^ (unsigned char)flags;
+    if (checksum != expected) return 8;
+    printf("{\"format\":\"P0E2\",\"boot_id\":%lu,\"generation\":%lu,"
+           "\"trace\":%lu,\"flags\":%lu,\"checksum\":%lu}\n",
+           boot, generation, trace, flags, checksum);
     return 0;
 }

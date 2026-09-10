@@ -52,6 +52,9 @@ union usb_setup_packet {struct {u8 bmRequestType,bRequest;uint16_t wValue,wIndex
 enum { P0_EP0_SETUP_CONSUMED=BIT(0),P0_EP0_GET_HANDLER=BIT(1),P0_EP0_IN_ARMED=BIT(2),
        P0_EP0_IN_COMPLETE=BIT(3),P0_EP0_STATUS_ARMED=BIT(4),
        P0_EP0_STATUS_COMPLETE=BIT(5),P0_EP0_NEXT_SETUP=BIT(6) };
+#define P0_EP0_ARMED BIT(1)
+#define P0_EP0_FROZEN BIT(2)
+#define P0_EP0_MARK(dev,bit) do{if(((dev)->p0_ep0_flags&(P0_EP0_ARMED|P0_EP0_FROZEN))==P0_EP0_ARMED)(dev)->p0_ep0_trace|=(bit);}while(0)
 static bool p0_is_get_line_coding(const union usb_setup_packet*s){return s->raw.bmRequestType==0xa1&&s->raw.bRequest==0x21&&s->raw.wValue==0&&s->raw.wIndex==2&&s->raw.wLength==7;}
 '''
 prefix += source[source.index('enum ep0_state {'):source.index('};', source.index('enum ep0_state {'))+2]
@@ -62,7 +65,7 @@ typedef struct {
  const void *ep0_buffer; unsigned ep0_buffer_len;
  struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
- u8 p0_ep0_trace;bool p0_get_line_coding_active;
+ u8 p0_ep0_trace;u8 p0_ep0_flags;bool p0_get_line_coding_active;
 } dwc2_dev_t;
 static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
 static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
@@ -167,7 +170,7 @@ int main(void){
  usb_dwc2_ep_hw_recv(&d,0,7,1);
  assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  // The observed A1/21 interface-2 request: IN data, OUT status, next SETUP.
- d.p0_ep0_trace=0;d.p0_get_line_coding_active=false;
+ d.p0_ep0_trace=0;d.p0_ep0_flags=P0_EP0_ARMED;d.p0_get_line_coding_active=false;
  s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
  s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
  daint=BIT(16);outint=DWC2_DOEPINT_SETUP;
