@@ -94,6 +94,18 @@ not present in that call path. The mock test now explicitly exercises the observ
 interface-2 GET through IN completion, OUT status and rearmed SETUP. It passes;
 the test cannot prove the hardware delivered those interrupts or DMA data.
 
+Sessions e/f failed before Pongo during checkm8 re-enumeration. Inspection of the
+actual generated `artifacts/openra1n-build/openra1n.c` shows serial acquisition
+already temporarily raises the transfer timeout to 500 ms, then restores the
+checkm8 timeout. A short-circuit expression combines device-descriptor transfer,
+string-descriptor transfer and length checks, so the generic serial-read error
+does not identify which failed. The wrapper deliberately stops on that error
+before another reopen/attempt. Do not claim a 5 ms descriptor timeout caused these
+failures, remove the identity gate, or silently allow automatic exploit retries.
+Further diagnosis needs per-transfer status/length evidence, not another blind
+DFU repetition. No host executable, retry behavior or driver was changed for
+this inspection.
+
 `transport_probe.py` requires a reviewed identity bound to the new boot, then
 re-enumerates and compares it before open. Incomplete/ambiguous identity is a
 no-send failure. If Windows again exposes no explicit interface, descriptor /
