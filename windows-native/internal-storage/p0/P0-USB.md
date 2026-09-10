@@ -1808,3 +1808,24 @@ current device state.
 | --- | --- |
 | `Collect-TransportInventory.ps1` | `C8AB7FBA372FECF4B29AF36A74DA12AF7BBD714E6810B69D6C868392030E78D6` |
 | `test_inventory_output.py` | `F3198C753E70F74D5547C97448B5DEC4C52FCC602459F6C5C528A87410AA31A0` |
+
+### Session z Checkm8 driver-gate stop
+
+The user subsequently reported a fresh DFU entry. The corrected inventory was
+run once and successfully saved `[]`, SHA-256
+`A5338D955B09046EC0B16F3A9625B7955C763AAE07DC722E474E6078745F932F`.
+It enumerates only 1209:316D targets, so zero candidates was not treated as DFU
+identity proof.
+
+The Session-z Checkm8 command was invoked once and stopped at its pre-launch
+identity/driver gate: the exact DFU instance reported `WINUSB` while the stage
+requires `libusbK`. The exploit executable was not launched and no
+`Checkm8.json` was created. Pongo and passive-payload commands were not run.
+There was no driver replacement, retry, alternative route, active control
+request, COM open, P_NOP, ANS or NAND operation.
+
+The saved stop record is
+`artifacts/p0-usb/session-z-epena-xfrc/CHECKM8-DRIVER-GATE.md`. A future attempt
+requires changing only the exact owned A1625 DFU instance to `libusbK` through
+the existing documented procedure, then confirming the resulting live DFU
+state. No global Apple USB driver replacement is permitted.
