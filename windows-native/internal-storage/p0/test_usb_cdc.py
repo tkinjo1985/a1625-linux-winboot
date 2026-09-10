@@ -71,29 +71,38 @@ typedef struct {
 static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
 static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
 static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
+static unsigned control_bits,out_dma_addr,out_dma_size,out_control_bits;
+static unsigned inject_in_completion;
 static bool in_ep_enabled;
 static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
 static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){statuses++;if(e==USB_LEP_CTRL_OUT)usb_dwc2_ep_hw_recv(d,e,64,1);}
-static void usb_dwc2_start_setup_phase(dwc2_dev_t*d){(void)d;setups++;}
+static int usb_dwc2_start_setup_phase(dwc2_dev_t*d);
 static void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d);
-static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_buffer_len==7);armed++;return 0;}
+static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d);
 static void dma_rmb(void){}
 static bool published;
 static void dma_wmb(void){published=true;}
-static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;if(a==80)return in_ep_enabled?DWC2_DXEPCTLi_EnableEP:0;return remaining;}
+static unsigned read32(unsigned a){
+ if(a==10)return daint;if(a==20)return outint;
+ if(a==30){unsigned v=inint;if(inject_in_completion==1){inint|=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;inject_in_completion=0;}return v;}
+ if(a==80){unsigned v=in_ep_enabled?DWC2_DXEPCTLi_EnableEP:0;if(inject_in_completion==3){inint|=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;inject_in_completion=0;}return v;}
+ return remaining;
+}
 static void write32(unsigned a,unsigned v){
  if(a==20)outint&=~v; // endpoint interrupt registers are modeled as W1C latches
- if(a==30)inint&=~v;
+ if(a==30){inint&=~v;if(inject_in_completion==2){inint|=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;inject_in_completion=0;}}
+ if(a==50)out_dma_addr=v;if(a==0)out_dma_size=v;
  if(a==60){assert(published);dma_addr=v;}if(a==70)dma_size=v;
 }
-static unsigned control_bits;
-static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);}else control_bits=v;}
+static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);}else if(a==40)out_control_bits=v;else control_bits=v;}
 static const u8 phyEndpoints[]={0,0x80};
 '''
 body = function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
 assert body
+body += function('static int usb_dwc2_start_setup_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t *dev)')
+body += function('static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t *dev)')
 body += '\nstatic void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d){usb_dwc2_ep0_handle_class(d,d->endpoints[0].xfer_buffer);}\n'
 body += function('static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)')
 body += function('static void usb_dwc2_ep0_handle_xfer_not_ready(dwc2_dev_t *dev)')
@@ -112,6 +121,27 @@ int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};u8 in_payload[64]={0};
  d.endpoints[0].xfer_buffer=payload;d.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet s={.raw={0x21,0x20,0,0,7}};
+#ifdef COMPLETION_CASE_C
+ // A new GET is active while an older XferCompl is pending. Inject completion
+ // of the new GET at one exact MMIO boundary selected by the build.
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_SEND_DONE;
+ daint=BIT(0);inint=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=true;
+ inject_in_completion=COMPLETION_CASE_C;
+ usb_dwc2_handle_interrupts_ep(&d);
+ if(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE){
+  daint=BIT(0);usb_dwc2_handle_interrupts_ep(&d);
+ }
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
+ // A separately latched duplicate IN completion must not stand in for the
+ // host's OUT status. It may be acknowledged, but cannot advance EP0.
+ if(inint){daint=BIT(0);usb_dwc2_handle_interrupts_ep(&d);}
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
+ daint=BIT(16);outint=DWC2_DOEPINT_XFER_COMPL;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
+ assert(stalls==0);
+ return 0;
+#endif
 #ifdef COMPLETION_CASE_B_ONLY
  // Model B: SETUP supersedes the old control transfer and no old IN
  // completion remains separately observable. The first later completion is
@@ -142,6 +172,31 @@ int main(void){
  seq.raw.bmRequestType=0xa1;seq.raw.bRequest=0x21;
  usb_dwc2_ep0_handle_class(&seqd,&seq);
  assert(seqd.ep0_buffer_len==7 && !memcmp(seqd.ep0_buffer,payload,7));
+ // Follow the actual control-OUT receive programming through IN status and
+ // restoration of the shared EP0 OUT buffer for the next SETUP.
+ dwc2_dev_t outd={0};u8 outbuf[64]={0};u8 out_inbuf[64]={0};
+ outd.endpoints[0].xfer_buffer=outbuf;outd.endpoints[1].xfer_buffer=out_inbuf;
+ union usb_setup_packet outsetup={.raw={0x21,0x20,0,2,7}};
+ usb_dwc2_ep0_handle_class(&outd,&outsetup);
+ usb_dwc2_ep0_handle_xfer_not_ready(&outd);
+ assert(outd.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_DONE);
+ assert(out_dma_addr==(unsigned)(uintptr_t)outbuf && out_dma_size==(1U<<19|7));
+ assert(out_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
+ memcpy(outbuf,payload,7);remaining=0;usb_dwc2_ep0_handle_xfer_done(&outd);
+ assert(outd.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS);
+ usb_dwc2_ep0_handle_xfer_not_ready(&outd);
+ assert(outd.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE);
+ daint=BIT(0);inint=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;
+ usb_dwc2_handle_interrupts_ep(&outd);
+ assert(outd.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
+ assert(out_dma_addr==(unsigned)(uintptr_t)outbuf && out_dma_size==(1U<<19|64));
+ assert(out_control_bits==DWC2_DXEPCTLi_EnableEP);
+ outsetup.raw.bmRequestType=0xa1;outsetup.raw.bRequest=0x21;
+ memcpy(outbuf,&outsetup,sizeof(outsetup));
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;
+ usb_dwc2_handle_interrupts_ep(&outd);
+ assert(outd.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ assert(outd.ep0_buffer==outd.pipe[1].cdc_line_coding && outd.ep0_buffer_len==7);
  for(unsigned p=0;p<2;p++){
   s.raw.wIndex=p*2;usb_dwc2_ep0_handle_class(&d,&s);
   assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV);
@@ -183,7 +238,8 @@ int main(void){
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && !d.ep0_read_buffer);
  outint=DWC2_DOEPINT_SETUP|DWC2_DOEPINT_XFER_COMPL;
  usb_dwc2_handle_interrupts_ep(&d);
- assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_DONE && armed==1);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_DONE);
+ assert(out_dma_size==(1U<<19|7));
  d.endpoints[0].xfer_buffer=payload;remaining=0;daint=BIT(16);outint=1;
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE);
@@ -218,10 +274,10 @@ int main(void){
  }
  d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV_STATUS;
  usb_dwc2_ep_hw_recv(&d,0,64,1);
- assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
+ assert(out_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV;
  usb_dwc2_ep_hw_recv(&d,0,7,1);
- assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
+ assert(out_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  // The observed A1/21 interface-2 request: IN data, OUT status, next SETUP.
  d.p0_ep0_trace=0;d.p0_ep0_flags=P0_EP0_ARMED;d.p0_get_line_coding_active=false;
  s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
@@ -250,7 +306,22 @@ int main(void){
 main=main.replace(' return 0;', ' published=false;usb_dwc2_ep_hw_send(&d,1,7,1);assert(published && d.endpoints[1].in_flight==7);\n return 0;')
 out = ROOT / 'artifacts/p0-usb/tests'
 out.mkdir(parents=True, exist_ok=True)
-candidate_c = prefix + body + main
+fixed_c = prefix + body + main
+
+# Reconstruct the exact EPENA candidate used in Session z. It accepted an IN
+# completion in every state except SETUP_PENDING; that permits a duplicate
+# completion to impersonate the still-pending OUT status completion.
+candidate_c = fixed_c
+fixed_completion = '''        bool ep0_in_completion_expected =
+            dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_DONE ||
+            dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
+        if (!new_setup && ep0_in_completion_expected && ep0_in_complete &&
+'''
+session_z_completion = '''        if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
+            ep0_in_complete &&
+'''
+assert candidate_c.count(fixed_completion) == 1
+candidate_c = candidate_c.replace(fixed_completion, session_z_completion)
 
 # Reconstruct the physically tested Session-y handler from the candidate. The
 # exact replacements ensure that source drift cannot silently alter the model.
@@ -334,6 +405,14 @@ def compile_case(name, text, case_b=False):
     subprocess.run(args + [str(c_path), '-o', str(exe_path)], check=True)
     return subprocess.run([str(exe_path)], capture_output=True, text=True)
 
+def compile_case_c(name, text, boundary):
+    c_path = out / f'{name}.c'
+    exe_path = out / f'{name}.exe'
+    c_path.write_text(text)
+    subprocess.run([str(gcc), '-std=c11', f'-DCOMPLETION_CASE_C={boundary}',
+                    str(c_path), '-o', str(exe_path)], check=True)
+    return subprocess.run([str(exe_path)], capture_output=True, text=True)
+
 def require_pass(result, label):
     assert result.returncode == 0, f'{label}: unexpected failure: {result.stderr}'
 
@@ -355,8 +434,20 @@ candidate_a = compile_case('cdc-candidate-a', candidate_c)
 require_pass(candidate_a, 'candidate case A')
 candidate_b = compile_case('cdc-candidate-b', candidate_c, case_b=True)
 require_pass(candidate_b, 'candidate case B')
+candidate_c_mid = compile_case_c('cdc-candidate-c-w1c-epena', candidate_c, 2)
+require_known_failure(candidate_c_mid, 'Session-z candidate case C W1C->EPENA',
+                      'd.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE')
+for boundary, label in ((1, 'snapshot->W1C'), (2, 'W1C->EPENA'), (3, 'after EPENA')):
+    require_pass(compile_case_c(f'cdc-fixed-c-{boundary}', fixed_c, boundary),
+                 f'fixed case C {label}')
+fixed_a = compile_case('cdc-fixed-a', fixed_c)
+require_pass(fixed_a, 'fixed case A')
+fixed_b = compile_case('cdc-fixed-b', fixed_c, case_b=True)
+require_pass(fixed_b, 'fixed case B')
 
 print('CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS')
 print('completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; '
       'Session-y A=PASS, B=XFAIL(expected assertion); candidate A=PASS, B=PASS')
 print('candidate premise: current IN completion is accepted only after EPENA clears')
+print('case C: Session-z W1C->EPENA=XFAIL(expected duplicate advancement); '
+      'fixed snapshot->W1C/W1C->EPENA/after-EPENA=PASS; fixed A/B=PASS')

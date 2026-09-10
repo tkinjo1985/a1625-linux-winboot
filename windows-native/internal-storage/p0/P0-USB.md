@@ -1,16 +1,17 @@
 # P0-USB: transport only
 
-The current measured boundary is Session y. With the stale-IN-completion fix
+The current measured boundary is Session z. With the EPENA/XFRC candidate
 payload, standard enumeration, the first GET_LINE_CODING, DTR=0 and
 SET_LINE_CODING all completed successfully on the Windows host, but the
 immediately following GET_LINE_CODING still stalled with zero bytes. Its
-preceding SET-completion-to-GET-dispatch interval was 9 microseconds and the
-GET-dispatch-to-STALL-completion interval was 8.9862 milliseconds. This is
+preceding SET-completion-to-GET-dispatch interval was 9.4 microseconds and the
+GET-dispatch-to-STALL-completion interval was 8.9110 milliseconds. This is
 decision result B: the software fix is insufficient for the physical boundary,
 not proof that its modeled race is impossible. Neither host interval exposes
 the device's internal interrupt order. COM open and P_NOP remain unverified,
 and ANS initialization/NAND access remain unexecuted. HostReadOnlyExperimental
-and RamOnly defaults remain unchanged.
+and RamOnly defaults remain unchanged. Session y remains preserved below as
+the preceding stale-IN-candidate result.
 
 Historically, the first recorded session stopped at Windows `SetCommState`
 error 31 before the first proxy packet and had no USB capture. That historical
@@ -1902,3 +1903,65 @@ The complete result is saved at
 No additional physical operation follows this result. The next work returns
 to offline source and trace analysis; another trial requires a new concrete
 hypothesis and reviewed scope rather than repeating Session z.
+
+## Post-Session z: EP0 IN completion state gate
+
+The Session-z handler reads the EP0 `DIEPINT0` snapshot, W1C-acknowledges that
+snapshot, and only then reads `DIEPCTL0.EPENA`. Case C places completion of the
+new GET at each of those MMIO boundaries. A new completion after the W1C but
+before the EPENA read clears EPENA and leaves a fresh XferCompl latched. The
+handler advances the GET to `DATA_RECV_STATUS_DONE`; the next invocation can
+then treat the remaining IN bit as if the host's OUT status had completed and
+prematurely rearm SETUP. When the real OUT completion arrives in
+`SETUP_HANDLE`, the existing `BAD STATUS with COMPL` branch explicitly stalls
+EP0 IN. Thus the test identifies a concrete STALL path, not merely a failed
+state assertion. Session-z ETW cannot show whether this ordering occurred on
+the device, so the hardware causal link remains unconfirmed.
+
+The minimum candidate accepts an EP0 IN XferCompl semantically only in states
+that wait for IN completion: `DATA_SEND_DONE` and
+`DATA_SEND_STATUS_DONE`. A bit observed while OUT status is pending is still
+W1C-acknowledged but cannot advance that OUT state. No delay, unconditional
+success, STALL suppression or arbitrary next-completion discard was added.
+
+The actual-source test retains A/B and adds Case C at snapshot-to-W1C,
+W1C-to-EPENA and after-EPENA boundaries. The exact Session-z candidate has the
+expected Case-C XFAIL at W1C-to-EPENA. The state-gated candidate passes all
+three C boundaries and A/B. Historical expected failures remain named rather
+than removed: pre-fix A and Session-y B.
+
+The OUT-data review now executes the real data-receive and setup-receive
+helpers. SET_LINE_CODING programs the shared EP0 OUT buffer with a seven-byte
+DOEPDMA0/DOEPTSIZ0 receive, copies from it after completion, sends IN status,
+then programs that same buffer for a 64-byte next-SETUP receive. The following
+GET is synchronously decoded from the restored buffer. No new software
+receive-target or length mismatch was found. This test checks the actual code's
+register writes and CPU buffer selection; it does not prove T7000 DMA timing,
+interrupt order or undocumented register readback.
+
+All 21 P0 host test files passed. The aggregate sandboxed run encountered the
+known permission-only failure launching saved `llvm-objdump`; that one
+read-only test was rerun once with permission and passed. The fixed native
+build succeeded. No physical operation was performed.
+
+| State-gate candidate | SHA-256 |
+| --- | --- |
+| `m1n1.bin` | `4B497D2AD2DDCDF038EB4B0C0D2CFB202F28ACEDCF8761233E32E9ECD94EFD33` |
+| source `usb_dwc2.c` | `98B07EAB4ABF503E09029E98E90B91A814776B779BB43A13DAD2E8D54CA0091D` |
+| complete `m1n1-p0.patch` | `53D620DA586A0D18A09812B6AB3E924F7B6F1995E087D39E8C1EEAB1DA57B8A4` |
+| `build-manifest.json` | `6495774C6E498F134430230A74A940DCA9114099FF38DD1A223D4E8E5F382258` |
+| `test_usb_cdc.py` | `9D2AE8222C8DC2C3F30F8BF2AEC1307EB93EAB73C7BF7A35339AEE9F5F3D3E0B` |
+| passive host script | `2F060712F0DF54DE28D545E37461C55F49FE5DBCC90F0AA69ABEC15CE6B974FE` |
+
+The frozen candidate is under
+`artifacts/p0-usb/payloads/ep0-in-state-gate-4b497d2a/`; the review record is
+`artifacts/p0-usb/ep0-in-state-gate-candidate/RESULT.md`.
+
+If separately approved after a fresh DFU report, one trial uses new directory
+`artifacts/p0-usb/session-aa-ep0-in-state-gate` and the unchanged Checkm8,
+Pongo and 35-second passive-enumeration wrappers, each at most once. The sole
+device-code variable is the state gate. A seven-byte second GET crosses this
+boundary; the same STALL makes the candidate insufficient; a moved failure is
+compared with the formerly successful prefix; missing target traffic is
+UNKNOWN. Every result stops. The trial does not open COM, send P_NOP, initialize
+ANS or access NAND, and it has not been authorized or executed here.

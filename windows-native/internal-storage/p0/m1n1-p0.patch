@@ -1523,7 +1523,7 @@ index fce0d5d..6091c33 100644
      usb_iodev->usage = USAGE_CONSOLE | USAGE_UARTPROXY;
      spin_init(&usb_iodev->lock);
 diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
-index 9220d62..fed3170 100644
+index 9220d62..4181aef 100644
 --- a/src/usb_dwc2.c
 +++ b/src/usb_dwc2.c
 @@ -41,6 +41,12 @@
@@ -1855,7 +1855,7 @@ index 9220d62..fed3170 100644
      if (daint && !(daint & (BIT(16) | BIT(0)))) // timing requirements
          usb_debug_printf("handle_interrupts_ep: DAINT = %x\n", daint);
      // dispatch handler for each endpoints
-@@ -1096,7 +1261,15 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1096,7 +1261,17 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
          u32 diepint = read32(dev->regs + DWC2_DIEPINT(0));
          write32(dev->regs + DWC2_DIEPINT(0), diepint);
          usb_debug_printf("ep0_in_handle_interrupt:  DWC2_DIEPINT(0)=%x\n", diepint);
@@ -1866,13 +1866,15 @@ index 9220d62..fed3170 100644
 +         * superseded status transfer can still share this bit.  The core
 +         * clears EPENA when the currently programmed IN transfer completes;
 +         * only advance that current transfer after observing that boundary. */
-+        if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
-+            ep0_in_complete &&
++        bool ep0_in_completion_expected =
++            dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_DONE ||
++            dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
++        if (!new_setup && ep0_in_completion_expected && ep0_in_complete &&
 +            !(read32(dev->regs + DWC2_DIEPCTL(0)) & DWC2_DXEPCTLi_EnableEP)) {
              usb_dwc2_ep0_handle_xfer_done(dev);
              usb_dwc2_ep0_handle_xfer_not_ready(dev);
          }
-@@ -1104,25 +1277,37 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1104,25 +1279,37 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
      }
  
      if (daint & BIT(16 + 0)) { // ep0_out
@@ -1915,7 +1917,7 @@ index 9220d62..fed3170 100644
              if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE) {
                  // usb_debug_printf("DWC2_DOEPINT_XFER_COMPL now with %s, doepint=%x\n",
                  // ep0_state_names[dev->ep0_state], doepint);
-@@ -1136,7 +1321,10 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1136,7 +1323,10 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
                  usb_error_printf(
                      "BAD STATUS with COMPL now with %s, doepint=%x DWC2_DOEPCTL(0)=%lx\n",
                      ep0_state_names[dev->ep0_state], doepint, dev->regs + DWC2_DOEPCTL(0));
@@ -1927,7 +1929,7 @@ index 9220d62..fed3170 100644
                  usb_dwc2_ep0_handle_xfer_not_ready(dev);
                  // hexdump(dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer, 0x20);
                  // usb_dwc2_ep_set_stall(dev, 0, 1);
-@@ -1222,6 +1410,11 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1222,6 +1412,11 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
  
      dma_rmb();
      u8 pep = phyEndpoints[ep];
@@ -1939,7 +1941,7 @@ index 9220d62..fed3170 100644
  
      // write the lower 32 bits the high bit is handled at the PHY level
      write32(dev->regs + DWC2_DOEPDMA(pep), (uintptr_t)dev->endpoints[ep].xfer_buffer);
-@@ -1229,7 +1422,10 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1229,7 +1424,10 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
      if (!ep) { // EP0
          // usb_debug_printf("usb_dwc2_ep_hw_recv with EP0out now:  state=%s\n",
          // ep0_state_names[dev->ep0_state]);
@@ -1951,7 +1953,7 @@ index 9220d62..fed3170 100644
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
          else
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP);
-@@ -1247,8 +1443,13 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1247,8 +1445,13 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
          usb_error_printf("usb_dwc2_ep_hw_send with dir_out endpoint =%u E \n", phyEndpoints[ep]);
          return;
      }
@@ -1966,7 +1968,7 @@ index 9220d62..fed3170 100644
      write32(dev->regs + DWC2_DIEPDMA(pep), (uintptr_t)dev->endpoints[ep].xfer_buffer);
      write32(dev->regs + DWC2_DIEPTSIZ(pep), (packet_count << 19) | hw_xfer_size);
      set32(dev->regs + DWC2_DIEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
-@@ -1259,6 +1460,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1259,6 +1462,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
  
  static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)
  {
@@ -1981,7 +1983,7 @@ index 9220d62..fed3170 100644
      // usb_debug_printf("handle_usbrst: Reset now\n");
      next_tx_fifo_addr = TX_FIFO_SIZE + RX_FIFO_SIZE; // EP0_TX+RX
      dev->endpoints[0].xfer_in_progress = false;
-@@ -1310,10 +1519,19 @@ static void usb_dwc2_ep_abort(dwc2_dev_t *dev, u8 ep)
+@@ -1310,10 +1521,19 @@ static void usb_dwc2_ep_abort(dwc2_dev_t *dev, u8 ep)
          // usb_debug_printf("EP%u IN abort\n", pep);
          if (read32(dev->regs + DWC2_DIEPCTL(pep)) & DWC2_DXEPCTLi_EnableEP) {
              set32(dev->regs + DWC2_DIEPCTL(pep), DWC2_DXEPCTLi_DisableEP);
@@ -2001,7 +2003,7 @@ index 9220d62..fed3170 100644
              }
          }
          write32(dev->regs + DWC2_DIEPINT(pep), read32(dev->regs + DWC2_DIEPINT(pep)));
-@@ -1323,17 +1541,35 @@ static void usb_dwc2_ep_abort(dwc2_dev_t *dev, u8 ep)
+@@ -1323,17 +1543,35 @@ static void usb_dwc2_ep_abort(dwc2_dev_t *dev, u8 ep)
      if (read32(dev->regs + DWC2_DOEPCTL(pep)) & DWC2_DXEPCTLi_EnableEP) {
          write32(dev->regs + DWC2_GINTSTS, DWC2_GINTSTS_GOUTNakEff);
          set32(dev->regs + DWC2_DCTL, DWC2_DCTL_SGOUTNak);
@@ -2037,7 +2039,7 @@ index 9220d62..fed3170 100644
          }
          set32(dev->regs + DWC2_DCTL, DWC2_DCTL_CGOUTNak);
      }
-@@ -1370,6 +1606,9 @@ void usb_dwc2_handle_interrupts(dwc2_dev_t *dev)
+@@ -1370,6 +1608,9 @@ void usb_dwc2_handle_interrupts(dwc2_dev_t *dev)
  
      u32 gintsts = 0;
      while (1) {
@@ -2047,7 +2049,7 @@ index 9220d62..fed3170 100644
          u32 val = read32(dev->regs + DWC2_GINTSTS);
          // usb_debug_printf("DWC2_GINTSTS=%x DAINT=%x\n", val, read32(dev->regs + DWC2_DAINT));
          write32(dev->regs + DWC2_GINTSTS,
-@@ -1410,6 +1649,9 @@ dwc2_dev_t *usb_dwc2_init(u64 regs)
+@@ -1410,6 +1651,9 @@ dwc2_dev_t *usb_dwc2_init(u64 regs)
      dwc2_dev_t *dev = calloc(1, sizeof(*dev));
      if (!dev)
          return NULL;
