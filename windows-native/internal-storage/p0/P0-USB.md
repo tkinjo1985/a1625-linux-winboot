@@ -730,3 +730,23 @@ new session directory exists but contains no stage record because the gate
 failed before record creation; it must not be reused. No retry or driver change
 was performed. A later attempt requires an exact-instance driver correction,
 a different new session directory, fresh DFU confirmation and new approval.
+
+## Session t: Checkm8 passed, Pongo pre-gate stop
+
+After the exact clean-DFU instance was changed to `libusbK`, the user approved
+a new run in `artifacts/p0-usb/session-t-ep0-autoreport`. Checkm8 ran once and
+passed its output, identity, location and host-artifact gates. The saved
+`Checkm8.json` records the expected USB(4)/HS04 location and exact host hashes.
+
+Before the Pongo process was launched, the stage wrapper found the resulting
+YOLO DFU identity (`CPID:7000`, `BDID:34`, ECID
+`000C14642E028026`, `YOLO:CHECKRA1N`) at the same location, but Windows had
+bound that re-enumerated instance to `WINUSB`. The required `libusbK` gate
+stopped the stage. Pongo was not transferred, and payload, inventory, arm, COM,
+disconnect/report, P_NOP, ANS and NAND operations did not run. No automatic
+retry or driver change was performed.
+
+Session t and its passed Checkm8 record may be continued only while the same
+YOLO identity and location remain present. The exact YOLO instance must first
+be changed to `libusbK`; then the Pongo command requires a new approval. If the
+device leaves YOLO DFU, Session t must not be resumed.
