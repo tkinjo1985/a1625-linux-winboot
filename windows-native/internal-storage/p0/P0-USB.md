@@ -53,6 +53,23 @@ status. It does not open a COM port. The old session's inventory was saved:
 usbser/OK, expected m1n1 product, but **no MI interface number in the instance**.
 Do not fill this missing field by assuming COM6 or interface 0.
 
+The collector currently derives interface number only from an `MI_xx` instance
+suffix. Its absence is therefore a limitation of this evidence, not proof that
+the device lacks interfaces or that usbser is broken. The source device descriptor
+uses class/subclass/protocol 02/00/00. Microsoft's documented automatic composite
+parent matching uses class 00 or EF/02/01; see
+https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/enumeration-of-the-composite-parent-device .
+This explains why expecting an MI child unconditionally is unjustified; it does
+not identify which CDC pair the current usbser instance selected. Do not change
+the descriptor or drivers merely to make the inventory predicate pass. A live
+configuration/selected-interface observation is needed to resolve that mapping.
+
+Session `artifacts/p0-usb/session-20260910-b` reached Pongo and transferred the
+revised payload successfully. Its m1n1 enumeration matches the DFU connection
+location and expected product/VID/PID, with usbser/OK, but still lacks an MI suffix.
+No COM open or proxy packet was attempted in that session. The stage records hash
+the actual saved `Invoke-UsbBootStage.ps1`, helper, executable and payload inputs.
+
 `transport_probe.py` requires a reviewed identity bound to the new boot, then
 re-enumerates and compares it before open. Incomplete/ambiguous identity is a
 no-send failure. If Windows again exposes no explicit interface, descriptor /
