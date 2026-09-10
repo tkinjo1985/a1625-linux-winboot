@@ -66,6 +66,15 @@ int main(void) {
   assert(ans1_dead && !sends && unwinds==1);
  }
  /* Silence unused globals copied from the production declaration section. */
+ ans1_dead=false; sends=unwinds=0;
+ for(int repeat=0;repeat<2;repeat++)
+  for(int lba=0;lba<2;lba++)
+   assert(ans1_read_main_storage(lba,(void *)(uintptr_t)0x1000));
+ assert(sends==4);
+ assert(!ans1_read_main_storage(0,(void *)(uintptr_t)0x1000));
+ assert(ans1_dead && sends==4 && unwinds==1);
+ assert(!ans1_read_main_storage(1,(void *)(uintptr_t)0x1000) && sends==4);
+ (void)ans1_stop_attempted; (void)ans1_cpu_clear;
  (void)ans1_akf; (void)ans1_attempted; (void)ans1_powered; (void)ans1_ready; (void)ans1_identify_result;
  puts("P0 all 256 opcodes, request bounds and DEAD latch passed");
 }

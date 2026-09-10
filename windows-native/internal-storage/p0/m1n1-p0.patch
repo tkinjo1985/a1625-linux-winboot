@@ -47,7 +47,7 @@ index 9a2cea9..e172262 100644
  
  bool akf_cpu_running(akf_dev_t *akf)
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..10c8174 100644
+index 9f771d2..a4bde0b 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -132,11 +132,13 @@ index 9f771d2..10c8174 100644
  /* mailbox messages */
  #define ANS1_MSG_TYPE                GENMASK(3, 0)
  #define ANS1_MSG_TYPE_SET_CMDBUF     0
-@@ -191,6 +116,12 @@ static akf_dev_t *ans1_akf;
+@@ -191,6 +116,14 @@ static akf_dev_t *ans1_akf;
  static rtkit_dev_t *ans1_rtkit;
  int ans1_ep = -1;
  static bool ans1_initialized, ans1_ready;
 +static bool ans1_attempted, ans1_dead, ans1_powered;
++static bool ans1_stop_attempted, ans1_cpu_clear;
++static u8 ans1_read_attempts[2];
 +static u8 ans1_identify_result[ANS1_CMD_SIZE];
 +#ifndef ANS1_P0
 +#error "This source is restricted to the ANS1_P0 smoke test"
@@ -145,7 +147,7 @@ index 9f771d2..10c8174 100644
  
  static bool ans1_epmap_cb(rtkit_dev_t *rtk, u32 base, u32 bitmap)
  {
-@@ -212,6 +143,7 @@ static bool ans1_epmap_cb(rtkit_dev_t *rtk, u32 base, u32 bitmap)
+@@ -212,6 +145,7 @@ static bool ans1_epmap_cb(rtkit_dev_t *rtk, u32 base, u32 bitmap)
          return false;
      }
  
@@ -153,7 +155,7 @@ index 9f771d2..10c8174 100644
      if (!rtkit_start_ep(rtk, ans1_ep)) {
          printf("ANS1: Unable to start ANS endpoint\n");
          return false;
-@@ -307,7 +239,16 @@ static bool ans1_wait_for_tag(rtkit_dev_t *rtk, u8 expected_tag)
+@@ -307,7 +241,16 @@ static bool ans1_wait_for_tag(rtkit_dev_t *rtk, u8 expected_tag)
  static bool ans1_exec_command(void)
  {
      struct rtkit_message rtk_msg;
@@ -171,7 +173,7 @@ index 9f771d2..10c8174 100644
      dma_wmb();
  
      rtk_msg.msg = FIELD_PREP(ANS1_SQ_DB_OP, ANS1_SQ_DB_OP_RING) | FIELD_PREP(ANS1_SQ_DB_TAG, 0) |
-@@ -316,22 +257,28 @@ static bool ans1_exec_command(void)
+@@ -316,22 +259,30 @@ static bool ans1_exec_command(void)
  
      if (!rtkit_send(ans1_rtkit, &rtk_msg)) {
          printf("ANS1: failed to send command\n");
@@ -195,15 +197,17 @@ index 9f771d2..10c8174 100644
          return false;
  
 -    if (((u64)buffer & 0xfff) != 0)
-+    if (!buffer || ((u64)buffer & 0xfff) || ((u64)buffer >> 44) || lba > 1) {
++    if (!buffer || ((u64)buffer & 0xfff) || ((u64)buffer >> 44) || lba > 1 ||
++        ans1_read_attempts[lba] >= 2) {
 +        ans1_dead = true;
 +        ans1_unwind();
          return false;
 +    }
++    ans1_read_attempts[lba]++;
  
      memset(cmd, '\0', ANS1_CMD_SIZE);
  
-@@ -343,8 +290,10 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
+@@ -343,8 +294,10 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
      struct ans1_io *io = (struct ans1_io *)(cmd + 1);
      io->sgl[0] = (u64)buffer >> 12;
  
@@ -215,7 +219,7 @@ index 9f771d2..10c8174 100644
  
      dma_rmb();
  
-@@ -353,34 +302,45 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
+@@ -353,34 +306,45 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
  
  bool ans1_init(void)
  {
@@ -268,7 +272,7 @@ index 9f771d2..10c8174 100644
  
      if (!ans1_ready && !ans1_wait_for_tag(ans1_rtkit, ANS1_COMPLETION_TAG_READY))
          goto out_shutdown;
-@@ -409,36 +369,79 @@ bool ans1_init(void)
+@@ -409,36 +373,72 @@ bool ans1_init(void)
              goto out_shutdown;
      }
  
@@ -305,6 +309,9 @@ index 9f771d2..10c8174 100644
 +    ans1_dead = true;
 +    ans1_initialized = false;
 +    ans1_ready = false;
++    if (ans1_stop_attempted)
+         return;
++    ans1_stop_attempted = true;
 +    bool slept = false;
 +    if (ans1_rtkit)
 +        slept = rtkit_sleep(ans1_rtkit);
@@ -315,34 +322,23 @@ index 9f771d2..10c8174 100644
 +            printf("ANS1-P0: STOP UNCONFIRMED; retain all buffers and power\n");
 +            return;
 +        }
++        ans1_cpu_clear = true;
 +    } else if (ans1_powered) {
 +        printf("ANS1-P0: no CPU readback; retain power\n");
-         return;
--
++        return;
++    }
++    /* CPU readback does not prove DMA quiescence. Retain every allocation,
++     * firmware mapping and power state until a manual power cycle. */
++    printf("ANS1-P0: CPU clear=%u DMA stop=UNPROVEN; retain all mappings/buffers; "
++           "no chainload or warm reboot; manual power cycle required\n", ans1_cpu_clear);
++}
+ 
 -    // For some reason rtkit_quiesce() would cause crash when startup again
 -    rtkit_sleep(ans1_rtkit);
 -    rtkit_free(ans1_rtkit);
 -    free(cmd);
 -    free(ans1_akf);
-+    }
-+    if (ans1_rtkit) {
-+        rtkit_free(ans1_rtkit);
-+        ans1_rtkit = NULL;
-+    }
-     free(cmd);
-+    cmd = NULL;
-+    if (ans1_akf) {
-+        akf_free(ans1_akf);
-+        ans1_akf = NULL;
-+    }
-+    if (ans1_powered) {
-+        int ret = pmgr_adt_power_disable("/arm-io/ans");
-+        printf("ANS1-P0: power disable=%d\n", ret);
-+        if (!ret)
-+            ans1_powered = false;
-+    }
-+}
-+
+-    free(cmd);
 +void ans1_shutdown(void)
 +{
 +    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
@@ -364,7 +360,8 @@ index 9f771d2..10c8174 100644
 +bool ans1_p0_shutdown(void)
 +{
 +    ans1_shutdown();
-+    return ans1_attempted && !ans1_akf && !ans1_rtkit && !cmd && !ans1_powered;
++    /* Observation only: never interpreted as DMA-stop confirmation. */
++    return ans1_cpu_clear;
  }
 diff --git a/src/ans1.h b/src/ans1.h
 index f16250f..7e9b690 100644
@@ -402,10 +399,82 @@ index 17e992c..ff5b0e2 100644
              reply->retval = main_storage_init();
              break;
 diff --git a/src/rtkit.c b/src/rtkit.c
-index 1e15405..febb44b 100644
+index 1e15405..cd5ff6b 100644
 --- a/src/rtkit.c
 +++ b/src/rtkit.c
-@@ -550,7 +550,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+@@ -356,6 +356,12 @@ out_free_rtk:
+ 
+ void rtkit_free(rtkit_dev_t *rtk)
+ {
++#ifdef ANS1_P0
++    if (rtk->iop_ops == rtkit_akf_iop_ops) {
++        rtkit_printf("P0 retains RTKit owner and all shared buffers\n");
++        return;
++    }
++#endif
+     rtkit_free_buffer(rtk, &rtk->syslog_bfr);
+     rtkit_free_buffer(rtk, &rtk->crashlog_bfr);
+     rtkit_free_buffer(rtk, &rtk->ioreport_bfr);
+@@ -402,6 +408,10 @@ bool rtkit_map(rtkit_dev_t *rtk, void *phys, size_t sz, u64 *dva)
+ 
+ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
+ {
++#ifdef ANS1_P0
++    if (rtk->iop_ops == rtkit_akf_iop_ops)
++        return false;
++#endif
+     if (rtk->sart) {
+         if (!sart_remove_allowed_region(rtk->sart, (void *)dva, sz))
+             rtkit_printf("sart_remove_allowed_region failed (0x%lx, 0x%lx)\n", dva, sz);
+@@ -418,6 +428,7 @@ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
+ 
+ bool rtkit_alloc_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr, size_t sz)
+ {
++    sz = ALIGN_UP(sz, 16384);
+     bfr->bfr = memalign(SZ_16K, sz);
+     if (!bfr->bfr) {
+         rtkit_printf("unable to allocate %zu buffer\n", sz);
+@@ -440,6 +451,10 @@ error:
+ 
+ bool rtkit_free_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr)
+ {
++#ifdef ANS1_P0
++    if (rtk->iop_ops == rtkit_akf_iop_ops)
++        return false;
++#endif
+     if (!bfr->bfr || !is_heap(bfr->bfr))
+         return true;
+ 
+@@ -458,6 +473,14 @@ static bool rtkit_handle_buffer_request(rtkit_dev_t *rtk, struct rtkit_message *
+     size_t sz = n_4kpages << 12;
+     u64 addr = FIELD_GET(MSG_BUFFER_REQUEST_IOVA, msg->msg);
+ 
++#ifdef ANS1_P0
++    /* No unowned firmware address translation, zero-sized allocation, or
++     * descriptor replacement after publication in this one-session test. */
++    if (rtk->iop_ops == rtkit_akf_iop_ops &&
++        (addr || !sz || sz > SZ_1M || bfr->bfr))
++        return false;
++#endif
++
+     if (rtk->sram) {
+         if (!addr) {
+             rtkit_printf("SRAM buffers needs to be provided by the IOP\n");
+@@ -512,6 +535,13 @@ static void rtkit_crashed(rtkit_dev_t *rtk)
+     struct crashlog_hdr *hdr = rtk->crashlog_bfr.bfr;
+     rtk->crashed = true;
+ 
++#ifdef ANS1_P0
++    if (rtk->iop_ops == rtkit_akf_iop_ops) {
++        rtkit_printf("P0 crash: retain raw buffer; do not parse untrusted crash records\n");
++        return;
++    }
++#endif
++
+     rtkit_printf("IOP crashed!\n");
+ 
+     if (hdr->type != 'CLHE') {
+@@ -550,7 +580,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
      if (rtk->crashed)
          return -1;
  
@@ -415,7 +484,7 @@ index 1e15405..febb44b 100644
          /* if this is an app message we can just forward it to the caller */
          if (msg->ep >= rtk->app_ep_start)
              return 1;
-@@ -661,6 +662,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
+@@ -661,6 +692,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
  bool rtkit_boot(rtkit_dev_t *rtk)
  {
      struct rtkit_message msg;
@@ -423,7 +492,7 @@ index 1e15405..febb44b 100644
  
      /* boot the IOP if it isn't already */
      rtk->iop_ops->cpu_start(rtk);
-@@ -728,6 +730,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -728,6 +760,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
      bool got_epmap = false;
  
      while (!got_epmap) {
@@ -432,7 +501,7 @@ index 1e15405..febb44b 100644
          if (!rtk->iop_ops->recv_timeout(rtk, &msg, USEC_PER_SEC)) {
              rtkit_printf("couldn't receive message while waiting for endpoint map\n");
              return false;
-@@ -815,6 +819,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -815,6 +849,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
          return false;
  
      while (rtk->iop_power != RTKIT_POWER_ON) {
@@ -441,7 +510,7 @@ index 1e15405..febb44b 100644
          struct rtkit_message rtk_msg;
          bool handled = false;
          int ret = rtkit_recv(rtk, &rtk_msg);
-@@ -847,6 +853,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -847,6 +883,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
  static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state target)
  {
      struct rtkit_message msg;
@@ -449,7 +518,7 @@ index 1e15405..febb44b 100644
  
      if (rtk->crashed)
          return false;
-@@ -861,6 +868,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -861,6 +898,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->ap_power != RTKIT_POWER_QUIESCED) {
@@ -458,7 +527,7 @@ index 1e15405..febb44b 100644
          /* Workaround for iOS 10 RTKit acknowledging AP power state 0x0 during sleep */
          if (rtk->protocol_ver < 11 && rtk->ap_power == RTKIT_POWER_OFF)
              break;
-@@ -891,6 +900,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -891,6 +930,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->iop_power != target) {
@@ -467,7 +536,7 @@ index 1e15405..febb44b 100644
          struct rtkit_message rtk_msg;
          int ret = rtkit_recv(rtk, &rtk_msg);
          bool handled = false;
-@@ -920,12 +931,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
+@@ -920,12 +961,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
  
  bool rtkit_sleep(rtkit_dev_t *rtk)
  {

@@ -9,24 +9,27 @@ Feature origin 8a8bc21922b21a909330d7dbec53e8a763e9fa34 is verified as an ancest
 Native Windows ARM64 build and host fault-injection tests pass. No P0 payload
 has been transferred or executed on hardware. This is not P0 acceptance.
 
-Execution is on hold: after the owner asked to use the recommended selector
-policy, the conservative interpretation was selected, including firmware's
-internal setting transmissions. The host path below never sends the forbidden
-selectors, but the existing ANS firmware has such startup paths. This patch
-does not modify that firmware. `execution_authorized` is false in the manifest;
-the smoke tool rejects execution before opening a serial port. Do not flip
-that field as a substitute for resolving the requirement.
+The owner has authorized HostReadOnlyExperimental for one boot session.
+Unmodified firmware-internal selector transmissions are no longer an execution
+blocker; see [firmware evidence](firmware-selectors.md). Firmware safety and absence
+of persistent side effects are not certified. RamOnly defaults are unchanged.
+`execution_authorized` is true; `preflight_verified` remains false for the concrete
+host-code/identity/mapping gaps in [preflight-audit.md](preflight-audit.md).
+The smoke tool rejects execution before opening a serial port until those gaps
+are resolved. Do not substitute a Boolean edit for completing the preflight.
 
 ## Implemented
 
 - Boolean rtkit_sleep result, bounded boot/power-state waits and bounded RX batches.
 - ANS1 one-attempt-per-boot latch; fresh endpoint/READY state; target check before power.
-- Unified init unwind, one command-buffer free, akf_free, sleep attempt followed
-  by explicit CPU-start-bit clear/readback. If stop cannot be confirmed, retain
-  command/RTKit allocations and power. No restart or recovery selector.
+- Unified init unwind, one sleep attempt followed by explicit CPU-start-bit
+  clear/readback. CPU clear is not DMA-stop proof: retain command/RTKit/AKF
+  owners, mappings and power even after clear. RTKit rejects AKF buffer freeing
+  and unmapping, including on send failure. No restart or recovery selector.
 - ANS1_P0 build required. Only IDENTIFY and READ_USERAREA constants/sender allowed.
   Requests must use tag 0; reads use one page, flags 8, LBA 0 or 1, a non-null
   4 KiB aligned buffer representable by the 44-bit SGL.
+  The C read entry point enforces at most two attempts per LBA per boot.
 - IDENTIFY occurs after endpoint/command registration; geometry must report
   4096-byte blocks and at least two LBAs. Reserved proxy slot 0xf07 copies its
   saved 128-byte response; it does not send another storage command.
@@ -49,15 +52,15 @@ patch, and builds build/m1n1.bin using CHAINLOADING=1 and ANS1_P0. Then run
 write-manifest.py with Windows Python to record source revision, feature origin,
 patch hash, Cargo lock hash, linker-wrapper hash and m1n1.bin SHA-256.
 
-Run test_commands.py and test_unwind.py with Windows Python. They exercise
+Run test_commands.py, test_unwind.py and test_rtkit_retention.py with Windows Python. They exercise
 actual source function bodies with mocked transports/allocators. They cover
 all 256 opcodes, invalid tag/length/LBA/flags/address, failure latching, bool
-sleep results and stop-readback-controlled cleanup. They do not prove live
+sleep results and retention regardless of CPU readback. They do not prove live
 firmware behavior, all initialization failure interleavings or DMA quiescence.
 
 ## Remaining acceptance
 
-Resolve the firmware selector constraint before any device action. Independently
+Resolve the concrete preflight-audit gaps before any device action. Independently
 verify the loaded P0 binary before selecting a proxy serial port; a supplied
 hash argument alone is not remote attestation. Then collect device console,
 IDENTIFY, repeated LBA hashes, EFI PART and shutdown CPU readback. Finally verify

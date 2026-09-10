@@ -26,9 +26,16 @@ manifest = {
     'cargo_lock_sha256': sha(SRC / 'rust/Cargo.lock'),
     'linker_wrapper_sha256': sha(ROOT / 'windows-native/msys-aarch64-ld-wrapper.sh'),
     'build_flags': ['USE_CLANG=1', 'ARCH=aarch64-none-elf', 'CHAINLOADING=1', 'EXTRA_CFLAGS=-DANS1_P0'],
-    'hardware_executed': False, 'execution_authorized': False,
+    'hardware_executed': False, 'execution_authorized': True,
+    'execution_policy': 'HostReadOnlyExperimental',
+    'preflight_verified': False,
     'acceptance': 'unverified',
-    'selector_scope': 'Includes firmware-internal settings; current firmware not proven compliant',
+    'selector_scope': 'Controlled Windows/m1n1/Linux operations only; unmodified firmware internal selectors are not an execution blocker',
+    'firmware_persistent_side_effects': 'not_guaranteed_absent',
+    'session_limit': 1,
+    'backup_available': False, 'valuable_data_present': False, 'dfu_recovery_available': True,
+    'historical_firmware_capture_sha256': sha(ROOT / 'artifacts/ans-offline-tests/ans-fw-live-region.bin'),
+    'loaded_firmware_sha256': None,
 }
 (HERE / 'build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(manifest['m1n1_bin_sha256'])

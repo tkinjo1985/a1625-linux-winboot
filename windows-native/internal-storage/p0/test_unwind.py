@@ -21,6 +21,7 @@ typedef struct rtkit_dev { struct ops *iop_ops; } rtkit_dev_t;
 static int switches, stops, rfree, cfree, afree, disables;
 static bool sleep_ok, stuck;
 static bool ans1_dead, ans1_initialized, ans1_ready, ans1_powered;
+static bool ans1_stop_attempted, ans1_cpu_clear;
 static void *ans1_akf, *cmd;
 static rtkit_dev_t *ans1_rtkit;
 #define RTKIT_POWER_SLEEP 1
@@ -30,11 +31,11 @@ static bool rtkit_switch_power_state(rtkit_dev_t *r,int p) {
 static void cpu_stop(rtkit_dev_t *r) { assert(r); stops++; }
 static void akf_cpu_stop(void *a) { assert(a); stops++; }
 static bool akf_cpu_running(void *a) { assert(a); return stuck; }
-static void rtkit_free(void *r) { assert(r && !stuck); rfree++; }
-static void mock_free(void *p) { if(p) { assert(!stuck); cfree++; } }
+void rtkit_free(void *r) { assert(r && !stuck); rfree++; }
+void mock_free(void *p) { if(p) { assert(!stuck); cfree++; } }
 #define free mock_free
-static void akf_free(void *a) { assert(a && !stuck); afree++; }
-static int pmgr_adt_power_disable(const char *p) { assert(p && !stuck); disables++; return 0; }
+void akf_free(void *a) { assert(a && !stuck); afree++; }
+int pmgr_adt_power_disable(const char *p) { assert(p && !stuck); disables++; return 0; }
 '''
 tests = r'''
 int main(void) {
@@ -50,22 +51,21 @@ int main(void) {
    switches=stops=rfree=cfree=afree=disables=0;
    ans1_akf=&o; cmd=&o; ans1_rtkit=&r;
    ans1_powered=ans1_initialized=ans1_ready=true; ans1_dead=false;
+   ans1_stop_attempted=ans1_cpu_clear=false;
    ans1_unwind();
    assert(ans1_dead && !ans1_initialized && !ans1_ready);
    assert(switches==1 && stops==sleeping+1);
-   if(stuck) {
-    assert(!rfree && !cfree && !afree && !disables);
-    assert(cmd && ans1_akf && ans1_rtkit && ans1_powered);
-   } else {
-    assert(rfree==1 && cfree==1 && afree==1 && disables==1);
-    assert(!cmd && !ans1_akf && !ans1_rtkit && !ans1_powered);
-    ans1_unwind();
-    assert(rfree==1 && cfree==1 && afree==1 && disables==1);
-   }
+   assert(!rfree && !cfree && !afree && !disables);
+   assert(cmd && ans1_akf && ans1_rtkit && ans1_powered);
+   assert(ans1_cpu_clear == !stuck);
+   ans1_unwind();
+   assert(switches==1 && stops==sleeping+1);
+   assert(!rfree && !cfree && !afree && !disables);
   }
  }
  /* Partial power enable / AKF allocation failure: CPU state is unknown. */
  ans1_akf=cmd=NULL; ans1_rtkit=NULL; ans1_powered=true;
+ ans1_stop_attempted=ans1_cpu_clear=false;
  switches=stops=rfree=cfree=afree=disables=0;
  ans1_unwind();
  assert(ans1_dead && ans1_powered);

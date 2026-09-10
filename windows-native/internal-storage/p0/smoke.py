@@ -19,7 +19,9 @@ def main():
     args = parser.parse_args()
     manifest = json.loads(Path(__file__).with_name('build-manifest.json').read_text())
     if not manifest.get('execution_authorized', False):
-        parser.error('hardware execution is on hold: firmware-internal selector prohibition is unproven')
+        parser.error('HostReadOnlyExperimental execution authorization missing')
+    if not manifest.get('preflight_verified', False):
+        parser.error('preflight incomplete; see preflight-audit.md for concrete host-code gates')
     if args.loaded_sha256 != manifest['m1n1_bin_sha256']:
         parser.error('loaded build hash differs from P0 manifest')
     args.output.mkdir(parents=True, exist_ok=False)
@@ -31,7 +33,9 @@ def main():
     iface.tty_log = console
     p = M1N1Proxy(iface)
     result = {'status': 'running', 'build_sha256': args.loaded_sha256,
-              'reads': [], 'shutdown_confirmed': False, 'tvos_cold_boot': 'unverified'}
+              'reads': [], 'cpu_start_bit_clear': False, 'dma_stop_proven': False,
+              'manual_power_cycle_required': True, 'tvos_cold_boot': 'unverified',
+              'firmware_persistent_side_effects': 'not_guaranteed_absent'}
     try:
         # Buffers remain allocated through this boot, including on transport loss.
         buf = p.memalign(4096, 4096)
@@ -65,11 +69,10 @@ def main():
         result['error'] = str(exc)
     finally:
         try:
-            result['shutdown_confirmed'] = bool(p.ans1_shutdown())
+            result['cpu_start_bit_clear'] = bool(p.ans1_shutdown())
         except Exception as exc:
             result['shutdown_error'] = str(exc)
-        if not result['shutdown_confirmed']:
-            result['status'] = 'failed'
+        result['stop_status'] = 'unconfirmed_dma_stop_all_shared_memory_retained'
         (args.output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         iface.dev.close()
         console.close()
