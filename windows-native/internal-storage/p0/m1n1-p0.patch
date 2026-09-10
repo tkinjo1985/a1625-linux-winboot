@@ -1484,3 +1484,170 @@ index fd6773a..4ce423d 100644
                  exc_count = 0;
                  exc_guard = GUARD_SKIP;
                  if (request.mrequest.size != 0) {
+diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
+index 9220d62..1224e3c 100644
+--- a/src/usb_dwc2.c
++++ b/src/usb_dwc2.c
+@@ -820,27 +820,32 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
+ {
+     int pipe = setup->raw.wIndex / 2;
+ 
+-    if (pipe >= CDC_ACM_PIPE_MAX)
++    if (pipe >= CDC_ACM_PIPE_MAX || (setup->raw.wIndex & 1))
+         goto unsupported_setup_pkt;
+ 
+     usb_debug_printf("ep0_handle_class: bRequest=0x%x pipe=%u\n", setup->raw.bRequest, pipe);
+ 
+     switch (setup->raw.bRequest) {
+         case USB_REQUEST_CDC_GET_LINE_CODING:
++            if (setup->raw.bmRequestType != 0xa1 || setup->raw.wValue ||
++                setup->raw.wLength != 7)
++                goto unsupported_setup_pkt;
+             dev->ep0_buffer_len = min(setup->raw.wLength, sizeof(dev->pipe[pipe].cdc_line_coding));
+             dev->ep0_buffer = dev->pipe[pipe].cdc_line_coding;
+             dev->ep0_state = USB_DWC2_EP0_STATE_DATA_SEND;
+             break;
+ 
+         case USB_REQUEST_CDC_SET_CTRL_LINE_STATE:
++            if (setup->raw.bmRequestType != 0x21 || setup->raw.wLength ||
++                (setup->raw.wValue & ~3))
++                goto unsupported_setup_pkt;
+             if (setup->raw.wValue & 1) { // DTR
+-                dev->pipe[pipe].ready = false;
+                 usb_debug_printf("ACM device opened\n");
+-                dev->pipe[pipe].ready = true;
+-                if (pipe == 1)
++                if (!dev->pipe[pipe].ready && pipe == 1)
+                     usb_dwc2_cdc_start_bulk_out_xfer(dev, USB_LEP_CDC_BULK_OUT_2);
+-                else if (pipe == 0)
++                else if (!dev->pipe[pipe].ready && pipe == 0)
+                     usb_dwc2_cdc_start_bulk_out_xfer(dev, USB_LEP_CDC_BULK_OUT);
++                dev->pipe[pipe].ready = true;
+             } else {
+                 dev->pipe[pipe].ready = false;
+                 usb_debug_printf("ACM device closed\n");
+@@ -850,14 +855,12 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
+             break;
+ 
+         case USB_REQUEST_CDC_SET_LINE_CODING:
+-            usb_dwc2_ep_set_stall(dev, 0, 1);
+-            dev->ep0_state = USB_DWC2_EP0_STATE_IDLE;
+-            // disable USB_REQUEST_CDC_SET_LINE_CODING for now, since it's useless for now
+-            // A handler for setup transcations with data stage has less timewindow
+-            //  dev->ep0_read_buffer = dev->pipe[pipe].cdc_line_coding;
+-            //  dev->ep0_read_buffer_len =
+-            //      min(setup->raw.wLength, sizeof(dev->pipe[pipe].cdc_line_coding));
+-            //  dev->ep0_state = USB_DWC2_EP0_STATE_DATA_RECV;
++            if (setup->raw.bmRequestType != 0x21 || setup->raw.wValue ||
++                setup->raw.wLength != 7)
++                goto unsupported_setup_pkt;
++            dev->ep0_read_buffer = dev->pipe[pipe].cdc_line_coding;
++            dev->ep0_read_buffer_len = 7;
++            dev->ep0_state = USB_DWC2_EP0_STATE_DATA_RECV;
+             break;
+ 
+         default:
+@@ -916,8 +919,21 @@ static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)
+             break;
+ 
+         case USB_DWC2_EP0_STATE_DATA_RECV_DONE:
++            /* DOEPTSIZ0 reports bytes remaining, not bytes received. Do not
++             * commit a short OUT transfer or acknowledge it as successful. */
++            dma_rmb();
++            if (!dev->ep0_read_buffer || dev->ep0_read_buffer_len != 7 ||
++                (read32(dev->regs + DWC2_DOEPTSIZ(0)) & 0x7f)) {
++                dev->ep0_read_buffer = NULL;
++                dev->ep0_read_buffer_len = 0;
++                usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_IN, 1);
++                dev->ep0_state = USB_DWC2_EP0_STATE_IDLE;
++                break;
++            }
+             memcpy(dev->ep0_read_buffer, dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer,
+                    dev->ep0_read_buffer_len);
++            dev->ep0_read_buffer = NULL;
++            dev->ep0_read_buffer_len = 0;
+             dev->ep0_state = USB_DWC2_EP0_STATE_DATA_SEND_STATUS;
+             break;
+ 
+@@ -1089,6 +1105,10 @@ static int usb_dwc2_start_status_phase(dwc2_dev_t *dev, u8 ep)
+ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+ {
+     u32 daint = read32(dev->regs + DWC2_DAINT);
++    /* Snapshot OUT first: a new SETUP supersedes the old transfer, including
++     * a simultaneous stale IN completion. Never advance the old state first. */
++    u32 ep0_out = (daint & BIT(16)) ? read32(dev->regs + DWC2_DOEPINT(0)) : 0;
++    bool new_setup = ep0_out & (DWC2_DOEPINT_STUP_PKT_RCVD | DWC2_DOEPINT_SETUP);
+     if (daint && !(daint & (BIT(16) | BIT(0)))) // timing requirements
+         usb_debug_printf("handle_interrupts_ep: DAINT = %x\n", daint);
+     // dispatch handler for each endpoints
+@@ -1096,7 +1116,8 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+         u32 diepint = read32(dev->regs + DWC2_DIEPINT(0));
+         write32(dev->regs + DWC2_DIEPINT(0), diepint);
+         usb_debug_printf("ep0_in_handle_interrupt:  DWC2_DIEPINT(0)=%x\n", diepint);
+-        if (diepint & DWC2_DOEPINT_XFER_COMPL) { // XferCompl
++        if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
++            (diepint & DWC2_DOEPINT_XFER_COMPL)) { // XferCompl
+             usb_dwc2_ep0_handle_xfer_done(dev);
+             usb_dwc2_ep0_handle_xfer_not_ready(dev);
+         }
+@@ -1104,7 +1125,7 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+     }
+ 
+     if (daint & BIT(16 + 0)) { // ep0_out
+-        u32 doepint = read32(dev->regs + DWC2_DOEPINT(0));
++        u32 doepint = ep0_out;
+         write32(dev->regs + DWC2_DOEPINT(0), doepint);
+         // usb_debug_printf("ep0_out_handle_interrupt: DWC2_DOEPINT(0)=%x\n", doepint);
+         bool setup_packet_recvd = doepint & DWC2_DOEPINT_STUP_PKT_RCVD;
+@@ -1112,17 +1133,20 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+         if (setup_packet_recvd || setup_phase_done) {
+             // usb_debug_printf("got (part of) setup_packet DMA done now with %s, doepint=%x\n",
+             // ep0_state_names[dev->ep0_state], doepint);
+-            if (dev->ep0_state == USB_DWC2_EP0_STATE_SETUP_HANDLE)
+-                dev->ep0_state = USB_DWC2_EP0_STATE_SETUP_PENDING;
++            dev->ep0_read_buffer = NULL;
++            dev->ep0_read_buffer_len = 0;
++            dev->ep0_state = USB_DWC2_EP0_STATE_SETUP_PENDING;
+         }
+         if (setup_phase_done) {
+             // usb_debug_printf("setup_phase_done now with %s, doepint=%x\n",
+             // ep0_state_names[dev->ep0_state], doepint);
+-            assert(dev->ep0_state == USB_DWC2_EP0_STATE_SETUP_PENDING);
++            dma_rmb();
++            usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_IN, 0);
++            usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_OUT, 0);
+             dev->ep0_state = USB_DWC2_EP0_STATE_SETUP_HANDLE;
+             usb_dwc2_ep0_handle_xfer_done(dev);
+             usb_dwc2_ep0_handle_xfer_not_ready(dev);
+-        } else if (doepint & DWC2_DOEPINT_XFER_COMPL) {
++        } else if (!setup_packet_recvd && (doepint & DWC2_DOEPINT_XFER_COMPL)) {
+             if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE) {
+                 // usb_debug_printf("DWC2_DOEPINT_XFER_COMPL now with %s, doepint=%x\n",
+                 // ep0_state_names[dev->ep0_state], doepint);
+@@ -1136,7 +1160,10 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+                 usb_error_printf(
+                     "BAD STATUS with COMPL now with %s, doepint=%x DWC2_DOEPCTL(0)=%lx\n",
+                     ep0_state_names[dev->ep0_state], doepint, dev->regs + DWC2_DOEPCTL(0));
+-                dev->ep0_state = USB_DWC2_EP0_STATE_DATA_SEND_STATUS;
++                dev->ep0_read_buffer = NULL;
++                dev->ep0_read_buffer_len = 0;
++                usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_IN, 1);
++                dev->ep0_state = USB_DWC2_EP0_STATE_IDLE;
+                 usb_dwc2_ep0_handle_xfer_not_ready(dev);
+                 // hexdump(dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer, 0x20);
+                 // usb_dwc2_ep_set_stall(dev, 0, 1);
+@@ -1259,6 +1286,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+ 
+ static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)
+ {
++    dev->ep0_read_buffer = NULL;
++    dev->ep0_read_buffer_len = 0;
++    dev->ep0_state = USB_DWC2_EP0_STATE_IDLE;
++    for (unsigned int i = 0; i < CDC_ACM_PIPE_MAX; i++) {
++        dev->pipe[i].ready = false;
++        memcpy(dev->pipe[i].cdc_line_coding, cdc_default_line_coding,
++               sizeof(cdc_default_line_coding));
++    }
+     // usb_debug_printf("handle_usbrst: Reset now\n");
+     next_tx_fifo_addr = TX_FIFO_SIZE + RX_FIFO_SIZE; // EP0_TX+RX
+     dev->endpoints[0].xfer_in_progress = false;
