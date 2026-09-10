@@ -728,6 +728,50 @@ index 315d48a..7d885bd 100644
 +bool heapblock_p0_reserve_firmware(u64 phys, u64 size);
  
  #endif
+diff --git a/src/main.c b/src/main.c
+index d4e828c..8b2b369 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -117,6 +117,7 @@ void run_actions(void)
+ #endif
+ #endif
+ 
++#ifndef ANS1_P0
+     printf("Checking for payloads...\n");
+ 
+     if (payload_run() == 0) {
+@@ -126,6 +127,9 @@ void run_actions(void)
+     fb_set_active(true);
+ 
+     printf("No valid payload found\n");
++#else
++    printf("ANS1-P0: proxy-only boot; appended/residual payload scanning disabled\n");
++#endif
+ 
+ #ifndef BRINGUP
+     if (!usb_up) {
+@@ -180,13 +184,21 @@ void m1n1_main(void)
+ #endif
+ 
+     cpufreq_fixup();
++#ifndef ANS1_P0
+     sep_init();
++#endif
+ #endif
+ 
+     printf("Initialization complete.\n");
+ 
+     run_actions();
+ 
++#ifdef ANS1_P0
++    /* Even a pre-session proxy exit cannot advance this build to another stage. */
++    while (true)
++        uartproxy_run(NULL);
++#endif
++
+     if (!next_stage.entry) {
+         panic("Nothing to do!\n");
+     }
 diff --git a/src/pmgr.c b/src/pmgr.c
 index 4119f8f..93d8dc6 100644
 --- a/src/pmgr.c

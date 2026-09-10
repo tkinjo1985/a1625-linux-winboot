@@ -34,6 +34,10 @@ USB-disconnect/exception behavior have not been hardware-tested. This is a
 host-entry restriction, not proof that every possible exception/reset path in
 m1n1 or hardware is excluded. No P0 firmware has been loaded in this work.
 
+The P0-only startup now skips automatic payload scanning and SEP initialization.
+If its action/proxy loop returns, it reenters the proxy instead of progressing
+to next-stage teardown/vectoring. `test_startup_object.py` checks actual compiled
+main.o references; this is a direct-startup-call check, not a complete call-graph proof.
 The general pre-experiment proxy and existing RamOnly defaults are unchanged.
 The current P0 tool uses no generic operation after sealing. Do not use a
 different tool to bypass the preflight or to start another phase in this boot.
