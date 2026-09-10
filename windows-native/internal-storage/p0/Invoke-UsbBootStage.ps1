@@ -12,7 +12,7 @@ $devices=@(Get-PnpDevice -PresentOnly | Where-Object InstanceId -match "^USB\\VI
 if($devices.Count -ne 1){throw 'Expected one target'}
 $device=$devices[0];$id=$device.InstanceId
 $service=(Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_Service).Data
-$expectedService=if($Stage -eq 'Pongo'){'WINUSB'}else{'libusbK'}
+$expectedService='libusbK'
 if($id -notmatch '(?i)CPID:7000(?:_|\b)' -or $id -notmatch '(?i)BDID:34(?:_|\b)' -or
    $id -notmatch "(?i)ECID:$([regex]::Escape($cfg.expectedEcid))(?:_|\b)" -or $device.Status -ne 'OK' -or
    $service -ne $expectedService) {throw "Identity/driver gate failed: expected $expectedService, got $service"}

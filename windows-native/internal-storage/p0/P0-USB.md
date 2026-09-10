@@ -175,12 +175,12 @@ stages 1, 2 and 3 plus the patch/trigger, and the wrapper stopped at
 `TRIGGER_HANDOFF` as designed. The same CPID/BDID/ECID and connection location
 re-enumerated with `YOLO:CHECKRA1N`, PnP status OK and service `WINUSB`.
 The separately approved Pongo stage was rejected before creating `Pongo.json`
-or starting openra1n because the wrapper incorrectly required `libusbK` for
-every stage. The generated openra1n success path explicitly expects YOLO to
-re-enumerate on WinUSB. The wrapper now requires `libusbK` for clean Checkm8 and
-the 05ac:4141 payload stage, but requires `WINUSB` together with the existing
-YOLO identity gate for Pongo. It records the accepted service in each new stage
-record. No driver was changed and the rejected attempt sent no Pongo data.
+or starting openra1n because the wrapper required `libusbK` while YOLO was
+still on `WINUSB`. Subsequent inspection of the preserved successful two-phase
+procedure established that WinUSB is only the parked handoff state: the exact
+YOLO 05ac:1227 instance must be rebound to `libusbK` before `--upload-only`.
+The temporary Pongo=`WINUSB` gate was incorrect and is reverted. Every boot
+stage requires `libusbK`, while clean/YOLO identity checks remain stage-specific.
 
 Two separately approved Pongo calls were then rejected by the location gate
 before creating `Pongo.json` or starting openra1n. The saved and current paths
@@ -192,6 +192,23 @@ to `string[]` and compares count, order and exact strings with `Compare-Object
 -SyncWindow 0`. That expression reports equality for the current two saved
 paths under Windows PowerShell 5.1. The gate is not weakened to set comparison,
 and neither rejected call transferred Pongo data.
+
+After the location fix, the approved Pongo process passed the temporary WinUSB
+gate but repeated `libusb_open(05ac:1227)` calls returned Input/Output Error,
+matching the vendored release note. It transferred no Pongo data. The child
+openra1n remained alive after its parent execution cell ended; the exact
+verified PID was stopped, and the stage record finalized as failed. No retry
+followed. A new Pongo attempt requires an explicitly approved driver rebind of
+only this YOLO instance, with its current driver recorded for rollback first.
+
+After that failed process was stopped, a later read-only PnP check found the
+same YOLO instance already rebound externally to `libusbK` 3.1.0.0 using
+`oem149.inf`; this task did not run a driver-change command. The earlier WinUSB
+service and Apple provider had been observed, but its version and INF were not
+captured and are recorded as unknown rather than inferred. The current and
+prior observations plus exact-instance rollback instructions are saved in
+`session-20260910-m/driver-before-pongo.json`. The Pongo stage gate is restored
+to require `libusbK`.
 
 After a manual physical return to DFU, read-only probe
 `artifacts/p0-usb/dfu-readonly-20260910-k` performed exactly one standard
