@@ -31,6 +31,10 @@ typedef uint8_t u8; typedef uint32_t u32;
 #define DWC2_DIEPINT(n) (30+(n))
 #define DWC2_DOEPCTL(n) (40+(n))
 #define DWC2_DOEPDMA(n) (50+(n))
+#define DWC2_DIEPDMA(n) (60+(n))
+#define DWC2_DIEPTSIZ(n) (70+(n))
+#define DWC2_DIEPCTL(n) (80+(n))
+#define USB_LEP_CDC_BULK_IN_2 6
 #define DWC2_DXEPCTLi_EnableEP (1U<<31)
 #define DWC2_DXEPCTL_ClearNAK (1U<<26)
 #define DWC2_DOEPINT_XFER_COMPL BIT(0)
@@ -47,7 +51,7 @@ typedef struct {
  unsigned regs; enum ep0_state ep0_state;
  void *ep0_read_buffer; unsigned ep0_read_buffer_len;
  const void *ep0_buffer; unsigned ep0_buffer_len;
- struct {void *xfer_buffer;} endpoints[2];
+ struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
 } dwc2_dev_t;
 static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed;
@@ -59,8 +63,10 @@ static void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d);
 static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t*d){(void)d;return 0;}
 static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_buffer_len==7);armed++;return 0;}
 static void dma_rmb(void){}
+static bool published;
+static void dma_wmb(void){published=true;}
 static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;return remaining;}
-static void write32(unsigned a,unsigned v){(void)a;(void)v;}
+static void write32(unsigned a,unsigned v){if(a==60)assert(published);(void)v;}
 static unsigned control_bits;
 static void set32(unsigned a,unsigned v){(void)a;control_bits=v;}
 static const u8 phyEndpoints[]={0,0x80};
@@ -79,6 +85,7 @@ reset = function('static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)')
 body += 'static const u8 cdc_default_line_coding[]={0x80,0x25,0,0,0,0,8};\n'
 body += reset[:reset.index('    // usb_debug_printf("handle_usbrst:')] + '\n}\n'
 body += function('static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 packet_count)')
+body += function('static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 packet_count)')
 main = r'''
 int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};d.endpoints[0].xfer_buffer=payload;
@@ -160,6 +167,7 @@ int main(void){
  return 0;
 }
 '''
+main=main.replace(' return 0;', ' published=false;usb_dwc2_ep_hw_send(&d,1,7,1);assert(published && d.endpoints[1].in_flight==7);\n return 0;')
 out = ROOT / 'artifacts/p0-usb/tests'
 out.mkdir(parents=True, exist_ok=True)
 (out / 'cdc.c').write_text(prefix + body + main)

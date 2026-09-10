@@ -1485,7 +1485,7 @@ index fd6773a..4ce423d 100644
                  exc_guard = GUARD_SKIP;
                  if (request.mrequest.size != 0) {
 diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
-index 9220d62..f3d1851 100644
+index 9220d62..9798226 100644
 --- a/src/usb_dwc2.c
 +++ b/src/usb_dwc2.c
 @@ -820,27 +820,32 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
@@ -1648,7 +1648,17 @@ index 9220d62..f3d1851 100644
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
          else
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP);
-@@ -1259,6 +1289,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1248,7 +1278,8 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+         return;
+     }
+ 
+-    dma_rmb();
++    /* Publish CPU-written IN payload before enabling DMA reads. */
++    dma_wmb();
+     write32(dev->regs + DWC2_DIEPDMA(pep), (uintptr_t)dev->endpoints[ep].xfer_buffer);
+     write32(dev->regs + DWC2_DIEPTSIZ(pep), (packet_count << 19) | hw_xfer_size);
+     set32(dev->regs + DWC2_DIEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
+@@ -1259,6 +1290,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
  
  static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)
  {
