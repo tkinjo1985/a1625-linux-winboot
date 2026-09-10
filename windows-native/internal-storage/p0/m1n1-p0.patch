@@ -1,5 +1,5 @@
 diff --git a/src/akf.c b/src/akf.c
-index 9a2cea9..fe82c84 100644
+index 9a2cea9..600e53e 100644
 --- a/src/akf.c
 +++ b/src/akf.c
 @@ -3,6 +3,7 @@
@@ -10,9 +10,12 @@ index 9a2cea9..fe82c84 100644
  #include "malloc.h"
  #include "string.h"
  #include "utils.h"
-@@ -44,9 +45,46 @@ struct akf_dev {
+@@ -43,10 +44,49 @@ struct akf_dev {
+     uintptr_t base;
      uintptr_t cpu_base;
      int iop_node;
++    bool p0_map_attempted, p0_mapped, p0_started, p0_failed;
++    unsigned int p0_stops, p0_sends, p0_recv_checks;
  };
 +static u64 p0_fw_phys, p0_fw_iova, p0_fw_size;
 +static bool p0_fw_reserved;
@@ -57,7 +60,7 @@ index 9a2cea9..fe82c84 100644
      int akf_path[8];
      int node = adt_path_offset_trace(adt, path, akf_path);
      if (node < 0) {
-@@ -71,6 +109,7 @@ akf_dev_t *akf_init(const char *path)
+@@ -71,6 +111,7 @@ akf_dev_t *akf_init(const char *path)
          akf->base = base + AKF_V2_OFF;
      } else {
          printf("akf: Unsupported compatible\n");
@@ -65,16 +68,26 @@ index 9a2cea9..fe82c84 100644
          return NULL;
      }
  
-@@ -86,7 +125,7 @@ akf_dev_t *akf_init(const char *path)
+@@ -85,8 +126,17 @@ akf_dev_t *akf_init(const char *path)
+ 
  bool akf_map_preloaded_fw(akf_dev_t *akf)
  {
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000) {
++        if (akf->p0_map_attempted || akf->p0_started || akf->p0_stops)
++            return false;
++        akf->p0_map_attempted = true;
++        if (read32(akf->cpu_base + AKF_CPU_CONTROL) & AKF_CPU_CONTROL_START)
++            return false;
++    }
++#endif
      int fw_node = adt_first_child_offset(adt, akf->iop_node);
 -    if (!fw_node) {
 +    if (fw_node <= 0) {
          printf("akf: IOP Firmware node not found\n");
          return false;
      }
-@@ -100,7 +139,13 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -100,7 +150,13 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
  
      if (!akf_fw_get_region(fw_node, &phys, &iova, &size))
          return false;
@@ -88,7 +101,7 @@ index 9a2cea9..fe82c84 100644
      write32(akf->cpu_base + AKF_REMAP_IOVA_LO, iova & 0xffffffff);
      write32(akf->cpu_base + AKF_REMAP_IOVA_HI, iova >> 32);
      write32(akf->cpu_base + AKF_REMAP_PHYS_LO, phys & 0xffffffff);
-@@ -109,19 +154,27 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -109,19 +165,46 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
      write32(akf->cpu_base + AKF_REMAP_SIZE_HI, size >> 32);
      /* 0 = BE, 1 = LE */
      write32(akf->cpu_base + AKF_ENDIANNESS, 1);
@@ -96,19 +109,38 @@ index 9a2cea9..fe82c84 100644
      write32(akf->cpu_base + AKF_UNK_80C, 0);
 +#endif
  
++    akf->p0_mapped = true;
      return true;
  }
  
  void akf_cpu_start(akf_dev_t *akf)
  {
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000) {
++        if (!akf->p0_mapped || akf->p0_started || akf->p0_stops)
++            return;
++        akf->p0_started = true;
++    }
++#endif
 +    u32 before = read32(akf->cpu_base + AKF_CPU_CONTROL);
      set32(akf->cpu_base + AKF_CPU_CONTROL, AKF_CPU_CONTROL_START);
 +    u32 after = read32(akf->cpu_base + AKF_CPU_CONTROL);
 +    printf("ANS1-P0: CPU start before=0x%x after=0x%x\n", before, after);
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000 && !(after & AKF_CPU_CONTROL_START))
++        akf->p0_failed = true;
++#endif
  }
  
  void akf_cpu_stop(akf_dev_t *akf)
  {
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000) {
++        if (akf->p0_stops >= 2)
++            return;
++        akf->p0_stops++;
++    }
++#endif
 +    u32 before = read32(akf->cpu_base + AKF_CPU_CONTROL);
      clear32(akf->cpu_base + AKF_CPU_CONTROL, AKF_CPU_CONTROL_START);
 +    u32 after = read32(akf->cpu_base + AKF_CPU_CONTROL);
@@ -116,6 +148,52 @@ index 9a2cea9..fe82c84 100644
  }
  
  bool akf_cpu_running(akf_dev_t *akf)
+@@ -131,6 +214,10 @@ bool akf_cpu_running(akf_dev_t *akf)
+ 
+ void akf_free(akf_dev_t *akf)
+ {
++#ifdef ANS1_P0
++    if (akf && akf->cpu_base == 0x208040000)
++        return;
++#endif
+     free(akf);
+ }
+ 
+@@ -141,6 +228,15 @@ int akf_get_iop_node(akf_dev_t *akf)
+ 
+ bool akf_can_recv(akf_dev_t *akf)
+ {
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000) {
++        if (akf->p0_failed || akf->p0_stops || akf->p0_recv_checks >= 0x1000000) {
++            akf->p0_failed = true;
++            return false;
++        }
++        akf->p0_recv_checks++;
++    }
++#endif
+     return !(read32(akf->base + AKF_MBOX_I2A_CONTROL) & AKF_MBOX_CONTROL_EMPTY);
+ }
+ 
+@@ -151,7 +247,18 @@ bool akf_can_send(akf_dev_t *akf)
+ 
+ bool akf_send(akf_dev_t *akf, u64 msg)
+ {
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000) {
++        if (!akf->p0_started || akf->p0_failed || akf->p0_stops || akf->p0_sends >= 128)
++            return false;
++        akf->p0_sends++;
++    }
++#endif
+     if (poll32(akf->base + AKF_MBOX_A2I_CONTROL, AKF_MBOX_CONTROL_FULL, 0, 200000)) {
++#ifdef ANS1_P0
++        if (akf->cpu_base == 0x208040000)
++            akf->p0_failed = true;
++#endif
+         printf("akf: A2I mailbox full for 200ms. Is the akf stuck?");
+         return false;
+     }
 diff --git a/src/akf.h b/src/akf.h
 index 05338b9..a870404 100644
 --- a/src/akf.h

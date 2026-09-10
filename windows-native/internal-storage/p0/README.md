@@ -51,6 +51,8 @@ are resolved. Do not substitute a Boolean edit for completing the preflight.
   rest of the boot; see [session-lock.md](session-lock.md).
   Firmware is reserved above a fixed heap ceiling before buffer allocation and
   ANS power; see [memory-ownership.md](memory-ownership.md).
+  ANS AKF remap/start/stop/TX are bounded at the register-operation helpers;
+  see [akf-mmio-allowlist.md](akf-mmio-allowlist.md).
 
 ## Build and verification
 
@@ -66,7 +68,7 @@ patch hash, Cargo lock hash, linker-wrapper hash and m1n1.bin SHA-256.
 
 Run test_commands.py, test_unwind.py, test_rtkit_retention.py, test_rtkit_budget.py,
 test_rtkit_policy.py, test_firmware_region.py, test_session_lock.py, test_mmio_identity.py
-test_pmgr_plan.py and test_heap_reservation.py
+test_pmgr_plan.py, test_heap_reservation.py and test_akf_mmio.py
 with Windows Python. They exercise
 actual source function bodies with mocked transports/allocators. They cover
 all 256 opcodes, invalid tag/length/LBA/flags/address, failure latching, bool
