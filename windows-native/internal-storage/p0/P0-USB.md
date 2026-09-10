@@ -170,6 +170,18 @@ restores the prior success-path instruction/I/O behavior except for failure-only
 branches. Hardware retest requires a fresh manual DFU entry because session l
 left the current instance unresponsive after stage 2.
 
+Approved session `artifacts/p0-usb/session-20260910-m` then completed Checkm8
+stages 1, 2 and 3 plus the patch/trigger, and the wrapper stopped at
+`TRIGGER_HANDOFF` as designed. The same CPID/BDID/ECID and connection location
+re-enumerated with `YOLO:CHECKRA1N`, PnP status OK and service `WINUSB`.
+The separately approved Pongo stage was rejected before creating `Pongo.json`
+or starting openra1n because the wrapper incorrectly required `libusbK` for
+every stage. The generated openra1n success path explicitly expects YOLO to
+re-enumerate on WinUSB. The wrapper now requires `libusbK` for clean Checkm8 and
+the 05ac:4141 payload stage, but requires `WINUSB` together with the existing
+YOLO identity gate for Pongo. It records the accepted service in each new stage
+record. No driver was changed and the rejected attempt sent no Pongo data.
+
 After a manual physical return to DFU, read-only probe
 `artifacts/p0-usb/dfu-readonly-20260910-k` performed exactly one standard
 control-IN request for the 18-byte device descriptor. It returned all 18 bytes

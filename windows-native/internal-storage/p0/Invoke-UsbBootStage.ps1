@@ -11,9 +11,11 @@ $pidText=if($Stage -eq 'Payload'){'4141'}else{'1227'}
 $devices=@(Get-PnpDevice -PresentOnly | Where-Object InstanceId -match "^USB\\VID_05AC&PID_$pidText")
 if($devices.Count -ne 1){throw 'Expected one target'}
 $device=$devices[0];$id=$device.InstanceId
+$service=(Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_Service).Data
+$expectedService=if($Stage -eq 'Pongo'){'WINUSB'}else{'libusbK'}
 if($id -notmatch '(?i)CPID:7000(?:_|\b)' -or $id -notmatch '(?i)BDID:34(?:_|\b)' -or
    $id -notmatch "(?i)ECID:$([regex]::Escape($cfg.expectedEcid))(?:_|\b)" -or $device.Status -ne 'OK' -or
-   (Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_Service).Data -ne 'libusbK') {throw 'Identity/driver gate failed'}
+   $service -ne $expectedService) {throw "Identity/driver gate failed: expected $expectedService, got $service"}
 if($Stage -eq 'Checkm8' -and $id -match 'YOLO:'){throw 'Expected clean DFU'}
 if($Stage -eq 'Pongo' -and $id -notmatch 'YOLO:'){throw 'Expected YOLO DFU'}
 $location=(Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_LocationPaths).Data
@@ -41,7 +43,7 @@ if($Stage -eq 'Payload'){
 }
 $recordPath=Join-Path $OutputDirectory "$Stage.json"
 if(Test-Path $recordPath){throw 'Stage already recorded; no automatic repeat'}
-$record=[ordered]@{stage=$Stage;status='starting';identity_verified=$true;location=$location;hashes=@(Get-FileHash $files | Select-Object Path,Hash)}
+$record=[ordered]@{stage=$Stage;status='starting';identity_verified=$true;service=$service;location=$location;hashes=@(Get-FileHash $files | Select-Object Path,Hash)}
 $record | ConvertTo-Json -Depth 6 | Set-Content $recordPath
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path windows-native/Restore-A1625RamEnvironment.ps1),[ref]$null,[ref]$null)
 foreach($name in @('Get-LogDelta','Invoke-BoundedProcess')){
