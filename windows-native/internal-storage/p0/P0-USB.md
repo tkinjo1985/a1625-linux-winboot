@@ -1497,3 +1497,34 @@ The result summary is preserved at
 `artifacts/p0-usb/session-y-ep0-stale-in/RESULT.md`. Session y is complete and
 must not be rerun. Further work should return to offline code/trace review and
 must not proceed directly to COM/P_NOP or ANS/NAND.
+
+### Post-Session y completion-identity ambiguity
+
+An additional actual-code regression was run offline after the physical result.
+It covers the opposite premise from the existing stale-completion regression:
+a new SETUP supersedes the old control transfer, no old IN completion remains
+separately observable, and the next IN completion therefore belongs to the new
+GET. The current `ep0_ignore_next_in_completion` logic incorrectly discards
+that completion. The assertion expecting `DATA_RECV_STATUS_DONE` failed in the
+generated `cdc.c` at line 509 with process exit `3221226505`.
+
+This counterexample is not claimed to reproduce Session y. Together, the two
+regressions establish a software ambiguity: the current single completion bit
+and one-bit discard state cannot distinguish a late old completion from the
+first completion of the newly armed GET unless an additional DWC2 ordering or
+register premise is established. Session y's host trace supplies no such
+device-side identity. Consequently no second speculative device fix or new
+payload was produced, and the tested Session-y payload remains the latest
+physical artifact rather than being silently replaced.
+
+The isolated counterexample patch and failure record are saved as
+`artifacts/p0-usb/session-y-ep0-stale-in/post-session-y-ambiguous-completion-test.patch`,
+SHA-256
+`4F4366A580FB1BDC21DD25E0C78A80F3A6BE7DE5119E7ED3C496648B7C2BDB45`.
+The patch was removed from the normal test after recording the failure; the
+unchanged supported `test_usb_cdc.py` then passed again. Before another device
+change, the required evidence is the active Apple/T7000 DWC2 mode's behavior
+for IN transfer-complete relative to back-to-back SETUP, including whether an
+old completion remains observable after SETUP and how W1C acknowledgement is
+ordered. Linux's descriptor-DMA control chains are not a substitute for that
+mode-specific premise.
