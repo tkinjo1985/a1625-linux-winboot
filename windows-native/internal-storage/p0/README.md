@@ -26,6 +26,8 @@ are resolved. Do not substitute a Boolean edit for completing the preflight.
   A stateful outbound management/registration policy runs at the AKF RTKit
   transport boundary; see [rtkit-allowlist.md](rtkit-allowlist.md).
 - ANS1 one-attempt-per-boot latch; fresh endpoint/READY state; target check before power.
+  The four ANS register ranges and compatible must match the saved J42d ADT
+  inventory before power enable; this is separate from the private ECID gate.
 - Unified init unwind, one sleep attempt followed by explicit CPU-start-bit
   clear/readback. CPU clear is not DMA-stop proof: retain command/RTKit/AKF
   owners, mappings and power even after clear. RTKit rejects AKF buffer freeing
@@ -59,7 +61,7 @@ write-manifest.py with Windows Python to record source revision, feature origin,
 patch hash, Cargo lock hash, linker-wrapper hash and m1n1.bin SHA-256.
 
 Run test_commands.py, test_unwind.py, test_rtkit_retention.py, test_rtkit_budget.py,
-test_rtkit_policy.py, test_firmware_region.py and test_session_lock.py
+test_rtkit_policy.py, test_firmware_region.py, test_session_lock.py and test_mmio_identity.py
 with Windows Python. They exercise
 actual source function bodies with mocked transports/allocators. They cover
 all 256 opcodes, invalid tag/length/LBA/flags/address, failure latching, bool

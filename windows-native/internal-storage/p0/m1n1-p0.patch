@@ -1,8 +1,39 @@
 diff --git a/src/akf.c b/src/akf.c
-index 9a2cea9..e172262 100644
+index 9a2cea9..61499ac 100644
 --- a/src/akf.c
 +++ b/src/akf.c
-@@ -71,6 +71,7 @@ akf_dev_t *akf_init(const char *path)
+@@ -45,8 +45,30 @@ struct akf_dev {
+     int iop_node;
+ };
+ 
++bool akf_p0_validate_ans(void)
++{
++    /* J42d RAM ADT inventory; this validates metadata without touching MMIO. */
++    static const u64 expected_base[] = {0x208040000, 0x208060000, 0x20e020000, 0x200f00000};
++    static const u64 expected_size[] = {0x2000, 0x1000, 0x1000, 0x100000};
++    int trace[8];
++    int node = adt_path_offset_trace(adt, "/arm-io/ans", trace);
++    if (node < 0 || !adt_is_compatible(adt, node, "iop,s5l8960x"))
++        return false;
++    for (unsigned int i = 0; i < 4; i++) {
++        u64 base, size;
++        if (adt_get_reg(adt, trace, "reg", i, &base, &size) < 0 ||
++            base != expected_base[i] || size != expected_size[i])
++            return false;
++    }
++    return true;
++}
++
+ akf_dev_t *akf_init(const char *path)
+ {
++#ifdef ANS1_P0
++    if (!strcmp(path, "/arm-io/ans") && !akf_p0_validate_ans())
++        return NULL;
++#endif
+     int akf_path[8];
+     int node = adt_path_offset_trace(adt, path, akf_path);
+     if (node < 0) {
+@@ -71,6 +93,7 @@ akf_dev_t *akf_init(const char *path)
          akf->base = base + AKF_V2_OFF;
      } else {
          printf("akf: Unsupported compatible\n");
@@ -10,7 +41,7 @@ index 9a2cea9..e172262 100644
          return NULL;
      }
  
-@@ -101,6 +102,7 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -101,6 +124,7 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
      if (!akf_fw_get_region(fw_node, &phys, &iova, &size))
          return false;
  
@@ -18,7 +49,7 @@ index 9a2cea9..e172262 100644
      write32(akf->cpu_base + AKF_REMAP_IOVA_LO, iova & 0xffffffff);
      write32(akf->cpu_base + AKF_REMAP_IOVA_HI, iova >> 32);
      write32(akf->cpu_base + AKF_REMAP_PHYS_LO, phys & 0xffffffff);
-@@ -109,19 +111,27 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -109,19 +133,27 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
      write32(akf->cpu_base + AKF_REMAP_SIZE_HI, size >> 32);
      /* 0 = BE, 1 = LE */
      write32(akf->cpu_base + AKF_ENDIANNESS, 1);
@@ -46,6 +77,18 @@ index 9a2cea9..e172262 100644
  }
  
  bool akf_cpu_running(akf_dev_t *akf)
+diff --git a/src/akf.h b/src/akf.h
+index 05338b9..5bd155b 100644
+--- a/src/akf.h
++++ b/src/akf.h
+@@ -8,6 +8,7 @@
+ typedef struct akf_dev akf_dev_t;
+ 
+ akf_dev_t *akf_init(const char *path);
++bool akf_p0_validate_ans(void);
+ void akf_free(akf_dev_t *akf);
+ 
+ int akf_get_iop_node(akf_dev_t *akf);
 diff --git a/src/akf_fw.c b/src/akf_fw.c
 index 182115d..f05fc8e 100644
 --- a/src/akf_fw.c
@@ -119,7 +162,7 @@ index 182115d..f05fc8e 100644
 +    return akf_fw_get_region_old(fw_node, phys, iova, size);
  }
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..0acc5e5 100644
+index 9f771d2..5a9ed67 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -293,7 +336,7 @@ index 9f771d2..0acc5e5 100644
  
      dma_rmb();
  
-@@ -353,34 +308,50 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
+@@ -353,34 +308,55 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
  
  bool ans1_init(void)
  {
@@ -315,6 +358,11 @@ index 9f771d2..0acc5e5 100644
          return false;
 +    }
 +    printf("ANS1-P0: target J42d/T7000 chip=0x%x board=0x%x\n", chip_id, board_id);
++    if (!akf_p0_validate_ans()) {
++        printf("ANS1-P0: J42d ANS MMIO metadata mismatch; no power enable\n");
++        ans1_dead = true;
++        return false;
++    }
 +    /* Power enable can partially succeed. Retain the uncertain state on error. */
 +    ans1_powered = true;
 +    if (pmgr_adt_power_enable("/arm-io/ans"))
@@ -351,7 +399,7 @@ index 9f771d2..0acc5e5 100644
  
      if (!ans1_ready && !ans1_wait_for_tag(ans1_rtkit, ANS1_COMPLETION_TAG_READY))
          goto out_shutdown;
-@@ -409,36 +380,102 @@ bool ans1_init(void)
+@@ -409,36 +385,102 @@ bool ans1_init(void)
              goto out_shutdown;
      }
  
@@ -389,7 +437,7 @@ index 9f771d2..0acc5e5 100644
 +    ans1_initialized = false;
 +    ans1_ready = false;
 +    if (ans1_stop_attempted)
-         return;
++        return;
 +    ans1_stop_attempted = true;
 +    bool slept = false;
 +    if (ans1_rtkit)
@@ -404,12 +452,18 @@ index 9f771d2..0acc5e5 100644
 +        ans1_cpu_clear = true;
 +    } else if (ans1_powered) {
 +        printf("ANS1-P0: no CPU readback; retain power\n");
-+        return;
+         return;
 +    }
 +    /* CPU readback does not prove DMA quiescence. Retain every allocation,
 +     * firmware mapping and power state until a manual power cycle. */
 +    printf("ANS1-P0: CPU clear=%u DMA stop=UNPROVEN; retain all mappings/buffers; "
 +           "no chainload or warm reboot; manual power cycle required\n", ans1_cpu_clear);
++}
++
++void ans1_shutdown(void)
++{
++    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
++        ans1_unwind();
 +}
  
 -    // For some reason rtkit_quiesce() would cause crash when startup again
@@ -418,13 +472,6 @@ index 9f771d2..0acc5e5 100644
 -    free(cmd);
 -    free(ans1_akf);
 -    free(cmd);
-+void ans1_shutdown(void)
-+{
-+    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
-+        ans1_unwind();
-+}
- 
--    pmgr_adt_power_disable("/arm-io/ans");
 +bool ans1_p0_identify_copy(void *buffer)
 +{
 +    if (!ans1_initialized || ans1_dead || !buffer || buffer != ans1_p0_read_buffer)
@@ -433,16 +480,17 @@ index 9f771d2..0acc5e5 100644
 +    return true;
 +}
  
--    ans1_initialized = false;
--    ans1_ready = false;
--    printf("ANS1: shutdown done\n");
+-    pmgr_adt_power_disable("/arm-io/ans");
 +bool ans1_p0_shutdown(void)
 +{
 +    ans1_shutdown();
 +    /* Observation only: never interpreted as DMA-stop confirmation. */
 +    return ans1_cpu_clear;
 +}
-+
+ 
+-    ans1_initialized = false;
+-    ans1_ready = false;
+-    printf("ANS1: shutdown done\n");
 +void *ans1_p0_prepare_buffer(void)
 +{
 +    if (ans1_p0_session || ans1_attempted)
