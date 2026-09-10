@@ -486,3 +486,46 @@ one-trial interpretation before a new approval is requested. The future trial
 retains the current identity, location, artifact and one-stage-at-a-time gates.
 It ends after COM plus three valid P_NOP replies at most; ANS initialization and
 all NAND access remain out of scope.
+
+## Session r: diagnostic recovery result
+
+Approved session `artifacts/p0-usb/session-20260910-r` passed Checkm8, PongoOS
+RAM boot and the hash-bound diagnostic m1n1 RAM boot. Every stage retained the
+same A1625 CPID/BDID/ECID and ordered connection location. The payload was
+exactly
+`314022A8732FD3343F5281001CBFD1A59A39AC518B38B5240B0AB00ACB104979`.
+
+The one fresh ETW-traced COM open again failed. UCX recorded exactly one
+`GET_LINE_CODING` (`A1/21`, `wValue=0`, `wIndex=2`, `wLength=7`) followed about
+30 seconds later by a zero-byte `0xC0010000` completion. It recorded no
+`SET_LINE_CODING`, P_NOP, ANS or NAND request. The ETL and XML SHA-256 values are
+`AD0F9F86B7931DEA905DFDA99D9B733ABE6ABA2B683DD2C784584BD359C0F07B` and
+`688217511CDF84AA1960352845AEF6836B4024F50EF15B3A772D9D1713807868`.
+
+The first attempted trace-reader launch was interrupted before its output
+directory or process existed, so it performed no device request. After the
+user supplied a new comprehensive authorization, filesystem and process checks
+confirmed that absence. One new trace read was then run through the guarded
+wrapper. All identity, parent-hub, location and artifact gates passed, and the
+helper made its one allowed string-descriptor request. That request did not
+return within five seconds; the exact child was stopped and no retry occurred.
+Its stdout is empty. Stderr contains only a truncated start of the helper's
+failure message and is not interpreted as a device result. The session record
+SHA-256 is
+`2DA423132E9C65697D07E48FE95F9950318638D50D9B5017C4A3A6CF63D78299`.
+
+No `P0Ehh` value was recovered. Consequently none of the four internal
+reachability hypotheses is resolved by session r. In particular, ETW does not
+prove that the device consumed SETUP, entered the GET handler, armed IN, or
+handled status. The post-failure index-4 read design is not a usable recovery
+channel for this observed failure and must not be retried or described as
+validated.
+
+The next diagnostic must establish its recovery channel while EP0 is healthy
+and arrange an autonomous, bounded report after the failing GET, rather than
+depending on a new request to the already-unresponsive EP0. One candidate is a
+P0-only pre-COM arm request followed by a bounded soft disconnect/re-enumeration
+that exposes the frozen byte in an advertised descriptor. That is only a design
+candidate: its timing, controller-reset behavior, identity changes and safety
+gates require host-only review and tests before another hardware approval.
+No further hardware operation is authorized by this paragraph.
