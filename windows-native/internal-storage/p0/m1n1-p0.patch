@@ -46,6 +46,78 @@ index 9a2cea9..e172262 100644
  }
  
  bool akf_cpu_running(akf_dev_t *akf)
+diff --git a/src/akf_fw.c b/src/akf_fw.c
+index 182115d..f05fc8e 100644
+--- a/src/akf_fw.c
++++ b/src/akf_fw.c
+@@ -15,7 +15,7 @@ static bool akf_fw_get_region_new(int fw_node, u64 *phys, u64 *iova, u64 *size)
+     }
+ 
+     unsigned int count = segments_len / sizeof(*seg);
+-    if (!count) {
++    if (!count || count > 128 || segments_len % sizeof(*seg)) {
+         printf("akf: segment-ranges too short\n");
+         return false;
+     }
+@@ -25,6 +25,9 @@ static bool akf_fw_get_region_new(int fw_node, u64 *phys, u64 *iova, u64 *size)
+     u64 region_phys_end = seg->phys + seg->size;
+ 
+     for (unsigned int i = 0; i < count; i++) {
++        if (!seg[i].size || seg[i].phys > ~(u64)0 - seg[i].size ||
++            seg[i].iova > ~(u64)0 - seg[i].size)
++            return false;
+         if (seg[i].iova < region_iova)
+             region_iova = seg[i].iova;
+ 
+@@ -35,6 +38,25 @@ static bool akf_fw_get_region_new(int fw_node, u64 *phys, u64 *iova, u64 *size)
+             region_phys_end = seg[i].phys + seg[i].size;
+     }
+ 
++    /* A single remap window cannot express different translations or holes. */
++    for (unsigned int i = 0; i < count; i++) {
++        if (seg[i].phys - region_phys != seg[i].iova - region_iova)
++            return false;
++    }
++    u64 covered = region_phys;
++    for (unsigned int pass = 0; pass < count && covered < region_phys_end; pass++) {
++        u64 next = covered;
++        for (unsigned int i = 0; i < count; i++) {
++            if (seg[i].phys <= covered && seg[i].phys + seg[i].size > next)
++                next = seg[i].phys + seg[i].size;
++        }
++        if (next == covered)
++            return false;
++        covered = next;
++    }
++    if (covered != region_phys_end)
++        return false;
++
+     *phys = region_phys;
+     *iova = region_iova;
+     *size = region_phys_end - region_phys;
+@@ -57,7 +79,7 @@ static bool akf_fw_get_region_old(int fw_node, u64 *phys, u64 *iova, u64 *size)
+ 
+     *iova = 0;
+ 
+-    if (*size == 0)
++    if (*size == 0 || *phys > ~(u64)0 - *size)
+         return false;
+ 
+     return true;
+@@ -81,9 +103,8 @@ bool akf_fw_get_region(int fw_node, u64 *phys, u64 *iova, u64 *size)
+      * it will be segment-ranges, but the unfilled region-base and region-size
+      * still exists
+      */
+-    if (!akf_fw_get_region_new(fw_node, phys, iova, size))
+-        if (!akf_fw_get_region_old(fw_node, phys, iova, size))
+-            return false;
+-
+-    return true;
++    /* Malformed new metadata must not silently select a stale old mapping. */
++    if (adt_getprop(adt, fw_node, "segment-ranges", NULL))
++        return akf_fw_get_region_new(fw_node, phys, iova, size);
++    return akf_fw_get_region_old(fw_node, phys, iova, size);
+ }
 diff --git a/src/ans1.c b/src/ans1.c
 index 9f771d2..a4bde0b 100644
 --- a/src/ans1.c
