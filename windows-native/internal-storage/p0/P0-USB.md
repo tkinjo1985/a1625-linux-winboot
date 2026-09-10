@@ -1853,3 +1853,52 @@ The exact stop record is
 continue only if the same live YOLO A1625 instance at the saved location is
 changed to `libusbK`. If it leaves that state or location, the passed Checkm8
 record must not be reused.
+
+### Session z: EPENA/XFRC candidate physical result
+
+After the user changed the exact YOLO instance driver, the Pongo command was
+run once and passed its CPID 7000, PongoOS 2.6.3, `libusbK` and saved
+USB(4)/HS04 location gates. `Pongo.json` SHA-256 is
+`FFD4BF1A339E4F3F3AF08ED7DE07F6ADF821631AC9873C13ECD413DE36F22271`.
+The passive wrapper was then run once with the approved payload
+`32DAFF697B7F66BE5335A1B020A7310993074607E08116D440DA9F47CA6D96A9`.
+It started ETW before the single RAM payload transfer, observed for 35 seconds
+and issued no descriptor request, COM open, proxy request, P_NOP, ANS or NAND
+operation. Payload identity passed as `usbser`, the established USB(4)/HS04
+location and product `m1n1 uartproxy v1.6.0-137-gd5a10ac-dirty`.
+
+The trace produced result B. The first GET_LINE_CODING returned seven bytes;
+SET_CONTROL_LINE_STATE and SET_LINE_CODING completed successfully; the second
+GET_LINE_CODING was dispatched 9.4 microseconds after the SET completion and
+failed 8.9110 ms later with NT `0xC0000001`, USBD `0xC0000004`, and zero
+bytes. Session y recorded the same request sequence and boundary, with 9.0
+microseconds and 8.9862 ms. These are host timestamps and do not reveal device
+CPU, DMA or interrupt order.
+
+Subsequent standard string-descriptor requests were cancelled at roughly
+five-second intervals with NT `0xC0000120`, USBD `0xC0010000`, and zero bytes,
+as in Session y. Successful enumeration before the CDC boundary included the
+device, configuration and 82-byte product-string descriptor path. Neither an
+ETW dispatch nor a cancellation proves that the device consumed that SETUP.
+
+This result rejects the claim that the EPENA/XFRC candidate fixes the physical
+boundary. It does not prove the documented EPENA semantics wrong, identify a
+device-side STALL call, or settle the old-versus-current completion ordering.
+The candidate is now the latest hardware-tested artifact, but it is
+insufficient and is not a completed USB fix. COM setting success and P_NOP
+remain unverified. ANS initialization and NAND access were not performed.
+
+The complete result is saved at
+`artifacts/p0-usb/session-z-epena-xfrc/RESULT.md`. Evidence hashes are:
+
+| Session-z evidence | SHA-256 |
+| --- | --- |
+| `timeline.etl` | `D6D923EFC33B4B5F853034A9F5C17FD165752B255FEFDEA0D12636F6050B5F3C` |
+| `timeline.xml` | `E42EF1840B2385A40E3203FA556E2509A530750B7D4C61A49BF17C8FD44C89C3` |
+| `phases.jsonl` | `12AA955AD031D85B6EF30CB21B177B9DC612CFC5B3774769E24B36EA73C25207` |
+| `Payload.json` | `2ED8F04C784F06C5124A9C0E1D6254981AD93D96797203B53546277A6D9448DA` |
+| `cdc-analysis.json` | `A48316511DB3A1CE11FCEF81DFB7ADEE8AB7DEB55D35139DCB384B0F6CA1D420` |
+
+No additional physical operation follows this result. The next work returns
+to offline source and trace analysis; another trial requires a new concrete
+hypothesis and reviewed scope rather than repeating Session z.
