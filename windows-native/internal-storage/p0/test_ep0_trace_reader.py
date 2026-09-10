@@ -7,11 +7,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 source_path = HERE / 'Read-Ep0Trace.c'
 wrapper_path = HERE / 'Invoke-Ep0TraceRead.ps1'
+boot_wrapper_path = HERE / 'Invoke-UsbBootStage.ps1'
 manifest_path = HERE / 'ep0-trace-reader-manifest.json'
 patch_path = HERE / 'm1n1-p0.patch'
 
 source = source_path.read_text()
 wrapper = wrapper_path.read_text()
+boot_wrapper = boot_wrapper_path.read_text()
 patch = patch_path.read_text()
 manifest = json.loads(manifest_path.read_text())
 
@@ -40,6 +42,12 @@ for required in ("InstanceId -eq $identity.instance_id", "-ne 'usbser'",
                  'com_opens=0;proxy_requests=0;ans_requests=0;nand_requests=0'):
     assert required in wrapper
 assert wrapper.count('Start-Process -FilePath $reader') == 1
+
+# A future approval is bound to the exact diagnostic payload, not merely to the
+# mutable manifest path or a prior session's authorization.
+assert '[string]$ApprovedPayloadSha256' in boot_wrapper
+assert "Approved payload hash is missing or does not match manifest" in boot_wrapper
+assert '$ApprovedPayloadSha256 -ne $m.m1n1_bin_sha256' in boot_wrapper
 
 # Manifest hashes bind the reviewed source and locally built executable.
 assert sha256(ROOT / manifest['source']) == manifest['source_sha256'].upper()

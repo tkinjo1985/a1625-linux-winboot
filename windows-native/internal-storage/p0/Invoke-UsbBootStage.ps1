@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][ValidateSet('Checkm8','Pongo','Payload')][string]$Stage,
-    [Parameter(Mandatory=$true)][string]$OutputDirectory
+    [Parameter(Mandatory=$true)][string]$OutputDirectory,
+    [string]$ApprovedPayloadSha256
 )
 $ErrorActionPreference='Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -38,6 +39,8 @@ if($Stage -eq 'Payload'){
     $m=Get-Content $manifestPath -Raw | ConvertFrom-Json
     $payload=[string](Resolve-Path $m.m1n1_bin_path)
     $patchPath=Join-Path $PSScriptRoot 'm1n1-p0.patch'
+    if($ApprovedPayloadSha256 -notmatch '^[0-9A-Fa-f]{64}$' -or
+       $ApprovedPayloadSha256 -ne $m.m1n1_bin_sha256){throw 'Approved payload hash is missing or does not match manifest'}
     if((Get-FileHash $payload).Hash -ne $m.m1n1_bin_sha256 -or (Get-FileHash $patchPath).Hash -ne $m.patch_sha256 -or
        (git -C third_party/HoolockLinux-m1n1-p0 rev-parse HEAD) -ne $m.source_revision){throw 'P0 artifact gate failed'}
     $exe=[string](Resolve-Path windows-native/pongo-uploader/target/release/atv-pongo-uploader.exe)
