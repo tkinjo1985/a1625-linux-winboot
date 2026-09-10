@@ -265,3 +265,11 @@ COM-configuration hang with the revised payload but, without a trace from this
 attempt, does not establish which control request or EP0 phase failed. Do not
 claim SET_LINE_CODING hardware success from this session and do not send P_NOP
 until COM configuration has completed.
+
+`Invoke-TracedComOpen.ps1` is the next-session diagnostic wrapper. It accepts
+only one currently present 1209:316D m1n1 identity with `usbser`, expected
+product and unchanged connection location. It starts the USB UCX ETW provider,
+runs exactly one `trace_open.py` COM-only attempt, stops that exact child after
+the 5--30 second bounded deadline, and always stops and converts the trace.
+The wrapper records zero P_NOP, ANS and NAND-read requests and refuses an
+existing output directory, so a failed session cannot be silently repeated.
