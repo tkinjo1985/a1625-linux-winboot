@@ -1,10 +1,18 @@
 # P0-USB: transport only
 
-The previous session ended at Windows `SetCommState` error 31, before the first
-proxy packet. It was **not an ANS bring-up failure**. No USB capture was collected;
-the unconditional CDC SET_LINE_CODING STALL in the actually used source is a
-code-level candidate, not a measured bus-level cause. Driver corruption is not
-established. HostReadOnlyExperimental and RamOnly defaults remain unchanged.
+The current measured boundary is Session v: standard enumeration, the first
+GET_LINE_CODING, DTR=0 and SET_LINE_CODING all completed successfully on the
+Windows host, then the immediately following GET_LINE_CODING stalled with zero
+bytes. The host-completion-to-dispatch interval was about 5.2 microseconds; the
+second GET dispatch-to-STALL-completion interval was about 8.919 milliseconds.
+Neither interval exposes the device's internal interrupt order. COM open and
+P_NOP remain unverified, and ANS initialization/NAND access remain unexecuted.
+HostReadOnlyExperimental and RamOnly defaults remain unchanged.
+
+Historically, the first recorded session stopped at Windows `SetCommState`
+error 31 before the first proxy packet and had no USB capture. That historical
+observation remains preserved below, but its earlier “SET_LINE_CODING not
+reached” boundary does not describe the current Session v build.
 
 ## Preserved evidence
 
@@ -1216,3 +1224,149 @@ repeat the passive test. The next work should isolate and review the rapid
 control-OUT-status to next-SETUP transition in the DWC2 source, with a failing
 software interleaving regression before any code change. Any later hardware
 validation needs a new artifact hash, exact plan, fresh boot and new approval.
+
+## Post-Session v: EP0 stale IN-status completion preparation
+
+### Fixed baseline and actual-code path
+
+Session v used source revision `d5a10ac52a6468484854419a6c5130f1d62073eb`
+and payload SHA-256
+`5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D`.
+That exact old payload has also been preserved as
+`artifacts/p0-usb/session-v-passive-enumeration/payload-used-5DAEF313.bin`;
+the Session v logs were not changed. The following review and tests use the
+same pinned source plus the new patch and do not describe Session v as having
+run the fix.
+
+The implemented SET-to-GET path in `src/usb_dwc2.c` is:
+
+1. `usb_dwc2_handle_interrupts_ep` snapshots DAINT/DOEPINT and passes an EP0
+   OUT transfer completion to `usb_dwc2_ep0_handle_xfer_done`.
+2. In `DATA_RECV_DONE`, `usb_dwc2_ep0_handle_xfer_done` checks the DOEPTSIZ0
+   residual, copies exactly seven bytes from the control OUT DMA buffer into
+   `pipe[1].cdc_line_coding`, clears the pending receive destination and moves
+   to `DATA_SEND_STATUS`.
+3. `usb_dwc2_ep0_handle_xfer_not_ready` calls `usb_dwc2_start_status_phase`;
+   this programs a zero-length EP0 IN transfer and changes the state to
+   `DATA_SEND_STATUS_DONE`.
+4. The corresponding EP0 IN completion enters
+   `usb_dwc2_ep0_handle_xfer_done`, which calls `usb_dwc2_start_setup_phase`.
+   That points `setup_pkt` at the control OUT DMA buffer, arms SETUP reception,
+   and leaves the state at `SETUP_HANDLE`.
+5. A new SETUP interrupt is handled by `usb_dwc2_ep0_handle_setup_phase_done`.
+   The class handler validates A1/21/0000/0002/0007, selects the saved pipe-1
+   seven bytes, and changes the state to `DATA_SEND`.
+6. The not-ready handler then programs the GET data on EP0 IN and changes the
+   state to `DATA_SEND_DONE`.
+
+`setup_pkt` does refer to the reused control OUT DMA buffer, but the current
+handler consumes its request fields synchronously. No later read of that
+pointer was found in the reviewed SET/GET path, so this review did not establish
+a dangling request-field use. The exact legal second GET can still reach STALL
+through class-request validation failure or an invalid EP0-state/default path;
+bad/short OUT completion has its own STALL path. Session v's host STALL does not
+identify which `usb_dwc2_ep_set_stall` call, if any, ran on the device.
+
+### Reproduced software race and minimal fix
+
+The actual extracted implementation had a reproducible interleaving: DAINT can
+be sampled before the preceding IN-status completion is serviced, the next
+SETUP can supersede the old control transfer and arm the new GET, and a delayed
+old IN completion can then be interpreted using the new `DATA_SEND_DONE` state.
+It advances the new GET to status receive even though its data completion has
+not occurred. Before the fix, the new regression failed on the invariant
+`d.ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_DONE` (generated `cdc.c`, line
+463; process exit `3221226505`). The input and event order are identical before
+and after the fix; no timing sleep is used.
+
+The minimal device change adds one boolean,
+`ep0_ignore_next_in_completion`. When a new SETUP supersedes
+`DATA_SEND_STATUS_DONE` and the old IN completion was not already present in
+the current interrupt snapshot, exactly one later IN completion is treated as
+belonging to the old transfer instead of advancing the new state. If the IN
+completion is already in the same snapshot, its W1C acknowledgement is accounted
+for and no later discard is armed. USB reset clears the flag. Request validation,
+descriptors, CDC interfaces, pipes, driver binding, stalls, and timeouts are
+unchanged; no print, delay, arm/descriptor/watchdog, or re-enumeration mechanism
+was added.
+
+This proves a software state-machine defect for the modeled, controller-possible
+ordering. It does not prove that Session v used exactly that ordering. In
+particular, Apple/T7000 interrupt-bit coalescing and the distinction between an
+old and a new completion at the hardware boundary remain unobserved. The mock
+models discrete pending events; it does not establish real DMA or interrupt
+timing.
+
+The official Linux DWC2 gadget implementation was consulted only as external
+primary-source context, at master commit `3dab139` as indexed on 2026-07-25,
+principally `drivers/usb/dwc2/gadget.c` EP0 setup/control handling. Its
+descriptor-DMA path uses controller-specific, separate setup/control descriptor
+handling. That supports treating SETUP reception as a controller-owned ordering
+problem, but the descriptor-DMA sequence was not copied and is not evidence for
+the active Apple/T7000 mode.
+
+### Regression, build, and saved artifacts
+
+`test_usb_cdc.py` executes the extracted real request, completion, and EP0
+interrupt bodies. Its new synthetic sequence is GET, DTR=0, SET with known bytes
+`00 C2 01 00 00 00 08`, then GET; those bytes are test input, not Session v
+observations. It covers normal prior-status completion, simultaneous SETUP and
+old IN completion, SETUP after the interrupt snapshot, a delayed old completion
+after new GET setup, and the current synchronous lifetime of request fields.
+Existing invalid type/value/length/interface, short OUT, standalone GET,
+82-byte product, DTR, buffer reuse and reset cases remain enabled.
+
+The same regression that failed before the device change passes after it. All
+20 P0 offline tests pass, including the startup-object inspection using the
+previously approved external `llvm-objdump`. A forced P0 native rebuild with
+`USE_CLANG=1 ARCH=aarch64-none-elf CHAINLOADING=1
+EXTRA_CFLAGS=-DANS1_P0` succeeded. The changed common `usb_dwc2.c` also compiles
+in a non-P0 configuration; a complete non-P0 build of this full P0 patch remains
+inapplicable because the pre-existing P0-only `ans1.c` intentionally stops it.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| complete `m1n1-p0.patch` | `2490D397F05E080AFD9156E1F70409050EE51A73810744074AC8C8C8521A82EB` |
+| `build-manifest.json` | `231039B77CDA26FAC7FB095019E5ABC1FADE653629F1D77E714B862D19E062C9` |
+| regression-only patch | `4C793EE7BDACD31C2349E4319C06EF43CD213FFDE7AF15E0D41C66DEAA0C6280` |
+| device-fix-only patch | `C309970DDC8946F8758DE7D790162AE4AD9DD45E24F3F3E40746E863DC6B4C73` |
+| `test_usb_cdc.py` | `07CCE1890B89191A58F6A4125625E0D3450AE324333C1FA551C2638166A51529` |
+| new versioned `m1n1.bin` | `39543DDB1A2D88C7950AF67506821846D0D1C08BCDF5E606D9B040C6D703740B` |
+| Session v preserved payload | `5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D` |
+| unchanged passive wrapper | `2F060712F0DF54DE28D545E37461C55F49FE5DBCC90F0AA69ABEC15CE6B974FE` |
+
+The new payload is stored at
+`artifacts/p0-usb/payloads/ep0-stale-in-39543ddb/m1n1.bin`. The manifest names
+that versioned path and binds it to the complete patch and source revision.
+
+### Proposed single hardware validation (not executed)
+
+Use a fresh DFU boot, a new directory
+`artifacts/p0-usb/session-w-ep0-stale-in`, and execute one stage at a time only
+after checking each actual result:
+
+```powershell
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Checkm8 -OutputDirectory artifacts/p0-usb/session-w-ep0-stale-in
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Pongo -OutputDirectory artifacts/p0-usb/session-w-ep0-stale-in
+& .\windows-native\internal-storage\p0\Invoke-PassiveEnumerationTrace.ps1 -OutputDirectory artifacts/p0-usb/session-w-ep0-stale-in -ApprovedPayloadSha256 39543DDB1A2D88C7950AF67506821846D0D1C08BCDF5E606D9B040C6D703740B -ObservationSeconds 35
+```
+
+The existing identity, ordered USB(4)/HS04 location, artifact, driver and
+safety gates remain mandatory. ETW starts before the wrapper switches to m1n1.
+The wrapper adds no COM open, product/index-4 read, proxy request, reset,
+re-enumeration or retry. It passively records the automatic descriptor,
+configuration and CDC sequence for 35 seconds. A driver-gate failure, identity
+or location mismatch, unexpected hash/state, or stage failure stops the session;
+it is not automatically retried. Session v's boot is not reused.
+
+| Result | Supported conclusion | Still unknown / next action |
+| --- | --- | --- |
+| A: same sequence; second GET succeeds with 7 bytes | the fix build passed this one observed transition and removed the Session-v boundary in this run | semantic equality of the seven bytes, reproducibility, COM/P_NOP and exact hardware race remain unproved; stop |
+| B: same second GET still STALLs | this software fix is insufficient for the observed boundary | device STALL source and controller ordering remain unknown; stop |
+| C: earliest failure moves | compare the new earliest failure with the previously successful prefix | do not call it overall success; stop and review the trace |
+| D: sequence absent or correlation/evidence incomplete | no conclusion about the fix | record UNKNOWN; do not repeat automatically |
+
+Even result A is only one passive enumeration result. COM configuration and
+P_NOP belong to a later, separately reviewed test. Every result stops before
+ANS initialization or NAND read/write. This hardware validation has not been
+run, fresh DFU readiness is not assumed, and new execution approval is required.

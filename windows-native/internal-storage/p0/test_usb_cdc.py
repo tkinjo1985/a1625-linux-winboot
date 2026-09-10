@@ -63,6 +63,7 @@ typedef struct {
  unsigned regs; enum ep0_state ep0_state;
  void *ep0_read_buffer; unsigned ep0_read_buffer_len;
  const void *ep0_buffer; unsigned ep0_buffer_len;
+ bool ep0_ignore_next_in_completion;
  struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
  u8 p0_ep0_trace;u8 p0_ep0_flags;bool p0_get_line_coding_active;
@@ -106,6 +107,21 @@ int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};u8 in_payload[64]={0};
  d.endpoints[0].xfer_buffer=payload;d.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet s={.raw={0x21,0x20,0,0,7}};
+ // Exact driver-init sequence with a known synthetic line-coding value.
+ dwc2_dev_t seqd={0};seqd.endpoints[0].xfer_buffer=payload;seqd.endpoints[1].xfer_buffer=in_payload;
+ union usb_setup_packet seq={.raw={0xa1,0x21,0,2,7}};
+ usb_dwc2_ep0_handle_class(&seqd,&seq);
+ assert(seqd.ep0_buffer==seqd.pipe[1].cdc_line_coding && seqd.ep0_buffer_len==7);
+ seq.raw.bmRequestType=0x21;seq.raw.bRequest=0x22;seq.raw.wLength=0;
+ usb_dwc2_ep0_handle_class(&seqd,&seq);assert(!seqd.pipe[1].ready);
+ seq.raw.bRequest=0x20;seq.raw.wLength=7;
+ usb_dwc2_ep0_handle_class(&seqd,&seq);
+ seqd.endpoints[0].xfer_buffer=payload;seqd.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV_DONE;remaining=0;
+ usb_dwc2_ep0_handle_xfer_done(&seqd);
+ assert(!memcmp(seqd.pipe[1].cdc_line_coding,payload,7));
+ seq.raw.bmRequestType=0xa1;seq.raw.bRequest=0x21;
+ usb_dwc2_ep0_handle_class(&seqd,&seq);
+ assert(seqd.ep0_buffer_len==7 && !memcmp(seqd.ep0_buffer,payload,7));
  for(unsigned p=0;p<2;p++){
   s.raw.wIndex=p*2;usb_dwc2_ep0_handle_class(&d,&s);
   assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV);
@@ -134,8 +150,9 @@ int main(void){
   assert(stalls==before+1 && d.pipe[0].cdc_line_coding[0]==0 && !d.ep0_read_buffer);
  }
  s.raw.bRequest=0x22;s.raw.wLength=0;s.raw.wValue=1;
+ unsigned bulk_before=bulk,statuses_before=statuses;
  usb_dwc2_ep0_handle_class(&d,&s);usb_dwc2_ep0_handle_class(&d,&s);
- assert(bulk==1 && statuses==2 && d.pipe[0].ready);
+ assert(bulk==bulk_before+1 && statuses==statuses_before+2 && d.pipe[0].ready);
  s.raw.wValue=0;usb_dwc2_ep0_handle_class(&d,&s);assert(!d.pipe[0].ready);
  // New SETUP interrupts an unfinished OUT; simultaneous old IN must not advance it.
  s.raw.bRequest=0x20;s.raw.wLength=7;s.raw.wValue=0;
@@ -152,6 +169,21 @@ int main(void){
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE);
  daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
+ // The next SETUP can be observed after DAINT was sampled but before the
+ // preceding IN-status completion is serviced. That old completion must not
+ // be interpreted as completion of the newly armed GET data phase.
+ s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
+ s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;inint=0;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ daint=BIT(0);inint=DWC2_DOEPINT_XFER_COMPL;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ // A following completion belongs to the newly armed GET and may advance it.
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
  // Reset while a line-coding OUT is pending discards its destination and DTR.
  d.ep0_read_buffer=d.pipe[1].cdc_line_coding;d.ep0_read_buffer_len=7;
  d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV_DONE;
