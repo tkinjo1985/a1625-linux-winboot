@@ -3,6 +3,7 @@
 # These files run inside MSYS or the Linux initramfs and must retain LF line
 # endings even when cloned on Windows.
 *.sh text eol=lf
+windows-native/internal-storage/p0/m1n1-p0.patch text eol=lf
 windows-native/codex-runtime/codex-ram text eol=lf
 windows-native/minimal-rootfs/init text eol=lf
 windows-native/minimal-rootfs/ram-getty text eol=lf
