@@ -1,0 +1,20 @@
+{
+  "source_url": "https://github.com/HoolockLinux/m1n1.git",
+  "source_revision": "d5a10ac52a6468484854419a6c5130f1d62073eb",
+  "ans1_feature_origin": "8a8bc21922b21a909330d7dbec53e8a763e9fa34",
+  "patch_sha256": "5d3d80b69c30c150d43cf29c89f6daf5c6d3720dbcfcaf7024590c30db5116e1",
+  "m1n1_bin_path": "third_party/HoolockLinux-m1n1-p0/build/m1n1.bin",
+  "m1n1_bin_sha256": "ba61086b316a2b7a38ef0ea228304362b3cf69057db07e79cfc002e91d6f3377",
+  "cargo_lock_sha256": "58dbc0049ee8065dd7992bbcdd45ec5e62608ec9bec996d2411802ad9ed408b1",
+  "linker_wrapper_sha256": "d97bf90b885780a75b8900938dce182ae8a4cbfea044086cbc57869caa64ee93",
+  "build_flags": [
+    "USE_CLANG=1",
+    "ARCH=aarch64-none-elf",
+    "CHAINLOADING=1",
+    "EXTRA_CFLAGS=-DANS1_P0"
+  ],
+  "hardware_executed": false,
+  "execution_authorized": false,
+  "acceptance": "unverified",
+  "selector_scope": "Includes firmware-internal settings; current firmware not proven compliant"
+}

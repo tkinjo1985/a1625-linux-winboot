@@ -12,7 +12,8 @@ $sources = @(
     [ordered]@{ Name = 'openra1n'; Url = 'https://github.com/mineek/openra1n.git'; Revision = '4595a5333e4134ade77b43fb2259e880b85801ee' },
     [ordered]@{ Name = 'Palera1nWin'; Url = 'https://github.com/pwnapplehat/Palera1nWin.git'; Revision = 'b62a087839048e4bc9a496519ccd7aca1df3246f' },
     [ordered]@{ Name = 'HoolockLinux-docs'; Url = 'https://github.com/HoolockLinux/docs.git'; Revision = 'ac579429c2bf842afb9b4aea8ed944a9afbe067e' },
-    [ordered]@{ Name = 'HoolockLinux-linux-native'; Url = 'https://github.com/HoolockLinux/linux.git'; Revision = '958481f87fee0949ff6a9a4af77f7eb6dac8a149' }
+    [ordered]@{ Name = 'HoolockLinux-linux-native'; Url = 'https://github.com/HoolockLinux/linux.git'; Revision = '958481f87fee0949ff6a9a4af77f7eb6dac8a149' },
+    [ordered]@{ Name = 'HoolockLinux-m1n1-p0'; Url = 'https://github.com/HoolockLinux/m1n1.git'; Revision = 'd5a10ac52a6468484854419a6c5130f1d62073eb' }
 )
 
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
