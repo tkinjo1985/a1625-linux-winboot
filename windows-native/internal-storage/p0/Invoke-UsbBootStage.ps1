@@ -18,9 +18,12 @@ if($id -notmatch '(?i)CPID:7000(?:_|\b)' -or $id -notmatch '(?i)BDID:34(?:_|\b)'
    $service -ne $expectedService) {throw "Identity/driver gate failed: expected $expectedService, got $service"}
 if($Stage -eq 'Checkm8' -and $id -match 'YOLO:'){throw 'Expected clean DFU'}
 if($Stage -eq 'Pongo' -and $id -notmatch 'YOLO:'){throw 'Expected YOLO DFU'}
-$location=(Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_LocationPaths).Data
+[string[]]$location=(Get-PnpDeviceProperty -InstanceId $id -KeyName DEVPKEY_Device_LocationPaths).Data
 $binding=Join-Path $OutputDirectory 'location.json'
-if(Test-Path $binding){if((Get-Content $binding -Raw | ConvertFrom-Json | ConvertTo-Json -Compress) -ne ($location | ConvertTo-Json -Compress)){throw 'USB location changed'}}
+if(Test-Path $binding){
+    [string[]]$savedLocation=Get-Content $binding -Raw | ConvertFrom-Json
+    if($savedLocation.Count -ne $location.Count -or @(Compare-Object $savedLocation $location -SyncWindow 0).Count -ne 0){throw 'USB location changed'}
+}
 else{$location | ConvertTo-Json | Set-Content $binding}
 $openManifest=Get-Content artifacts/openra1n-win/build-manifest.json -Raw | ConvertFrom-Json
 $exe=[string](Resolve-Path artifacts/openra1n-win/openra1n.exe)

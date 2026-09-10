@@ -182,6 +182,17 @@ the 05ac:4141 payload stage, but requires `WINUSB` together with the existing
 YOLO identity gate for Pongo. It records the accepted service in each new stage
 record. No driver was changed and the rejected attempt sent no Pongo data.
 
+Two separately approved Pongo calls were then rejected by the location gate
+before creating `Pongo.json` or starting openra1n. The saved and current paths
+were textually identical. Reproduction under the actual Windows PowerShell 5.1
+host showed the cause: piping the deserialized JSON array back through
+`ConvertTo-Json` produced a wrapper object with `value` and `Count`, while the
+live `System.String[]` serialized as a JSON array. The gate now casts both sides
+to `string[]` and compares count, order and exact strings with `Compare-Object
+-SyncWindow 0`. That expression reports equality for the current two saved
+paths under Windows PowerShell 5.1. The gate is not weakened to set comparison,
+and neither rejected call transferred Pongo data.
+
 After a manual physical return to DFU, read-only probe
 `artifacts/p0-usb/dfu-readonly-20260910-k` performed exactly one standard
 control-IN request for the 18-byte device descriptor. It returned all 18 bytes
