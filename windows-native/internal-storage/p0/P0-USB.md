@@ -1407,3 +1407,34 @@ Session w is closed at this pre-Pongo boundary. A new attempt must use a new
 session directory, fresh DFU entry, live identity/location gates, and new
 approval; the successful Session w Checkm8 record must not be reused as proof
 for another connection.
+
+## Session x: Checkm8 identity-descriptor failure
+
+The user again reported fresh DFU and approved the three commands for a new
+Session x directory. The Checkm8 command was run once. Its initial live gate
+found one clean-DFU A1625 with the expected identity, `libusbK`, status OK, and
+the same two-entry ordered physical location. The exploit process reported
+Stage 1 and Stage 2 success, but subsequent DFU identity descriptor reads timed
+out. Its bounded settling attempts ended at
+`DFU_IDENTITY_REOPEN_LIMIT: three opened handles rejected before the next
+exploit stage`; the process then reported that checkm8/YOLO failed or the device
+left DFU and exited 1. `Checkm8.json` therefore records `failed`.
+
+This is not a successful Checkm8 or YOLO transition. The approved Pongo and
+passive-trace commands were not run. There is no `Pongo.json`, `Payload.json`,
+or `passive-enumeration` directory, and the post-failure read-only inventory
+found no 05AC:1227, 05AC:4141, or 1209:316D device. No retry, COM/P_NOP, ANS
+initialization, or NAND access followed.
+
+The Session x evidence hashes are `Checkm8.json`
+`ED166E8B82982364DF19FE17D0E699E0D34F842E0B81F5C9F026234DDC170602`,
+`location.json`
+`A868892B6366ACD75B644C2736EDEEB8D124A3FC5A74CB62C700575A572EB6AB`,
+stdout `C87B74825976AE2F777A5B3549EBAC82657BA8A3B0A0BD30B38F33FA360F587B`,
+and empty stderr
+`E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`.
+The summarized failure record is
+`artifacts/p0-usb/session-x-ep0-stale-in/CHECKM8-FAILURE.md`, SHA-256
+`C972EB0E14C3243D87D7DD148B77F43F4545D5DE653DF0A3E74EF6343719409C`.
+Session x is closed; another attempt requires fresh DFU, a new directory, and
+new approval.
