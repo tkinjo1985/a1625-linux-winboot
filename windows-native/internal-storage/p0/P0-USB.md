@@ -244,3 +244,24 @@ Current result: **USB transport not yet validated on hardware**. Correct interfa
 binding, COM open/configuration and real P_NOP response remain unconfirmed.
 ANS initialization/NAND read requests in this work: zero. No NAND or DMA-stop
 claim follows from these USB tests.
+
+Approved session `artifacts/p0-usb/session-20260910-n` opened the same CPID
+7000/BDID 34/ECID and connection location through `libusbK`. The uploader
+reported all 135,598 Pongo bytes sent and Windows then enumerated 05ac:4141 as
+PongoOS 2.6.3 on that location. The payload uploader reported 1,163,264 bytes
+uploaded and `bootm` sent; Windows enumerated the expected 1209:316D
+`m1n1 uartproxy v1.6.0-137-gd5a10ac-dirty` through `usbser` as COM6 on the same
+location. Both wrapper records nevertheless say `failed` because the bounded
+process returned a null exit code. Preserve those records as the actual wrapper
+result. The wrapper now records the exit code but determines these two stages
+from the completion message plus exact post-stage USB identity, service, product
+and location checks.
+
+The session-n COM-only probe opened no proxy protocol and sent no P_NOP, ANS or
+NAND request. `Serial.open()` did not return within 30 seconds, so the host run
+was terminated and its exact residual `trace_open.py` process was stopped. Its
+pre-open record still says `com_configured: false`. This repeats the observable
+COM-configuration hang with the revised payload but, without a trace from this
+attempt, does not establish which control request or EP0 phase failed. Do not
+claim SET_LINE_CODING hardware success from this session and do not send P_NOP
+until COM configuration has completed.

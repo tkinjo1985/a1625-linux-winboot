@@ -19,6 +19,10 @@ def main():
         import serial
         from serial.tools.list_ports import comports
         ident = json.loads(identity_path.read_text(encoding='utf-8-sig'))
+        if isinstance(ident, list):
+            if len(ident) != 1:
+                raise RuntimeError(f'Expected one inventory candidate, found {len(ident)}')
+            ident = ident[0]
         result['identity_sha256']=hashlib.sha256(identity_path.read_bytes()).hexdigest()
         matches=[p for p in comports() if p.device==ident['port']]
         if len(matches)!=1 or (matches[0].vid,matches[0].pid,matches[0].serial_number)!=(0x1209,0x316d,ident['serial']):
