@@ -361,3 +361,121 @@ open. The next device session requires a reviewed EP0 diagnostic/fix, a new
 payload hash, a manual clean DFU entry and fresh approval. Keep the same
 identity, location and artifact gates. Stop after COM configuration and three
 validated P_NOP responses; do not proceed to ANS initialization or NAND access.
+
+## Proposed EP0 reachability diagnostic (review required)
+
+This section describes a prepared diagnostic build only. It has not been
+transferred to hardware and does not change session p's conclusion. In
+particular, the pipe-1 change is not established as a fix, and hardware has not
+reached `SET_LINE_CODING`.
+
+### Actual GET path
+
+For the observed `A1/21, wValue=0, wIndex=2, wLength=7` request, DWC2 places the
+SETUP packet in the logical EP0 OUT DMA buffer. `usb_dwc2_handle_interrupts_ep`
+handles `DWC2_DOEPINT_SETUP`, performs `dma_rmb`, clears EP0 stalls and calls
+`usb_dwc2_ep0_handle_setup`. The class dispatcher calls
+`usb_dwc2_ep0_handle_class`, maps interface 2 to pipe 1, validates the complete
+request tuple, points `ep0_buffer` at pipe 1's seven-byte line-coding value and
+sets `DATA_SEND`.
+
+The same interrupt pass calls `usb_dwc2_ep0_handle_xfer_not_ready`, which calls
+`usb_dwc2_ep0_start_data_send_phase`. That copies seven bytes into the fixed
+EP0 IN DMA buffer; `usb_dwc2_ep_hw_send` executes `dma_wmb`, writes DIEPDMA0 and
+DIEPTSIZ0, then enables EP0 IN with CNAK. An EP0 IN transfer-complete interrupt
+passes `DATA_SEND_DONE` through `usb_dwc2_ep0_handle_xfer_done`, changes state to
+`DATA_RECV_STATUS`, and arms one EP0 OUT packet for the host's zero-length
+status phase. Its OUT completion changes the state back to setup reception and
+arms EP0 OUT for the next SETUP.
+
+### Fixed observation record
+
+The proposed `ANS1_P0`-only code records one byte in RAM. Each checkpoint is a
+single OR operation; it adds no synchronous printf, allocation, retry or wait:
+
+| Bit | Value | Device observation |
+| --- | ---: | --- |
+| 0 | `0x01` | the exact target SETUP was visible after `dma_rmb` |
+| 1 | `0x02` | the validated GET handler was entered |
+| 2 | `0x04` | the seven-byte EP0 IN transfer was armed |
+| 3 | `0x08` | EP0 IN transfer-complete was handled |
+| 4 | `0x10` | EP0 OUT status reception was armed |
+| 5 | `0x20` | EP0 OUT status completion was handled |
+| 6 | `0x40` | a subsequent SETUP superseded/followed the target GET |
+
+The normal unit-test path reaches `0x3f` at status completion and `0x7f` when
+the next SETUP arrives. Values are cumulative; an unexpected non-prefix
+combination is treated as an instrumentation/state anomaly rather than forced
+into one of the four hypotheses.
+
+### Recovery without COM, proxy or UART
+
+The byte is exposed only in the P0 diagnostic build as unadvertised USB string
+descriptor index 4, formatted as fixed `P0Ehh`. `Read-Ep0Trace.c` first queries
+the parent hub connection and refuses anything except the current 1209:316D
+device. It then performs exactly one standard control-IN
+`GET_DESCRIPTOR(String, index 4, lang 0x0409, length 12)` through
+`IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION`. This path opens the parent USB
+hub, not COM, and sends no proxy, P_NOP, ANS or NAND command. The hub instance
+and connection port must be derived from the already-reviewed identity and
+location record; they must not be guessed.
+
+The diagnostic descriptor request is itself a new SETUP. If the target GET has
+entered its handler, its arrival records bit 6 before the snapshot is formatted. The
+existing new-SETUP handling is intended to let it supersede a stuck transfer.
+This recovery path is not yet hardware-validated. If the hub request fails or
+returns malformed data, no device-side reachability conclusion is allowed;
+host ETW alone still cannot identify the internal checkpoint. Do not fall back
+to an unverified UART, COM/proxy, a USB reset, driver replacement or automatic
+retry. `Invoke-Ep0TraceRead.ps1` is the only future entry point: it enforces the
+saved InstanceId, 1209:316D, `usbser`, product, parent hub and exact ordered
+location paths; derives one connection port from that reviewed location;
+verifies source, executable, manifest and identity hashes; refuses an existing
+output directory; and records one bounded attempt. Do not invoke the C helper
+directly.
+
+### Interpretation of one future trial
+
+After exactly one fresh COM-open attempt and exactly one trace-descriptor read:
+
+| Returned trace | Supported conclusion |
+| --- | --- |
+| `0x00` | the exact target SETUP was not consumed by the instrumented handler |
+| `0x01` | SETUP was observed, but the validated GET handler was not reached |
+| `0x43` | GET handler ran, but the seven-byte IN was not armed; bit 6 is the diagnostic read itself |
+| `0x47` | IN was armed, but no IN completion was handled; bit 6 is the diagnostic read itself |
+| `0x4f` | IN completed, but OUT status reception was not armed; bit 6 is the diagnostic read itself |
+| `0x5f` | OUT status was armed, but its completion was not handled; bit 6 is the diagnostic read itself |
+| `0x7f` | GET including OUT status completed and a later SETUP was seen |
+
+A successful Windows GET control transfer is also required before claiming
+GET success. `0x7f` with a failed host transfer indicates disagreement
+that requires investigation, not success. Only after COM configuration itself
+succeeds may the existing bounded probe send its three P_NOP requests.
+
+### Prepared difference and host-only verification
+
+The reproducible patch adds only the P0-only byte/active flag, seven checkpoint
+ORs and string index 4. The recovery helper source is
+`Read-Ep0Trace.c`. The diagnostic patch SHA-256 is
+`FEBF60EE6B74100E38ED91D73A032C94BFCB570E48C17AABBE78DCFE07A348FF`; the
+unrun diagnostic m1n1 binary SHA-256 is
+`314022A8732FD3343F5281001CBFD1A59A39AC518B38B5240B0AB00ACB104979`.
+The helper source and locally built helper SHA-256 values are respectively
+`CAC6512096B1B90A7606D00A4EDC39114CAF1E9D3797E9EF8B7D0D965FC28563` and
+`9FDA3295F53DE5C24DD6F30ACAC716CB599AEF537308CFC87F476288C41512AA`.
+The guarded wrapper and reader-manifest SHA-256 values are respectively
+`58C16A52B2EB5AA3E1AFA0929CEF0723819DEFD22CCED5899C45ED2767CC9BAA` and
+`45346C9C43E8B7BC089C9BF4824328B417895D943022A6691544BB08A4EA662F`.
+
+The full P0 build completed with only the pre-existing linker placement warning.
+All thirteen existing P0 host tests passed; the CDC test executes the actual
+instrumented functions and verifies the `0x3f` then `0x7f` sequence. The helper
+build passes GCC 16.1 with `-std=c11 -Wall -Wextra -Werror -municode`. No helper
+or diagnostic payload was run against the device.
+
+Review must resolve the diagnostic record, hub-IOCTL recovery assumptions and
+one-trial interpretation before a new approval is requested. The future trial
+retains the current identity, location, artifact and one-stage-at-a-time gates.
+It ends after COM plus three valid P_NOP replies at most; ANS initialization and
+all NAND access remain out of scope.

@@ -2,9 +2,9 @@
   "source_url": "https://github.com/HoolockLinux/m1n1.git",
   "source_revision": "d5a10ac52a6468484854419a6c5130f1d62073eb",
   "ans1_feature_origin": "8a8bc21922b21a909330d7dbec53e8a763e9fa34",
-  "patch_sha256": "2548a6515311f0cfabc35ac2dcfe23a3564b2e030212cb59cf4fbc827bb1373e",
+  "patch_sha256": "febf60ee6b74100e38ed91d73a032c94bfcb570e48c17aabbe78dcfe07a348ff",
   "m1n1_bin_path": "third_party/HoolockLinux-m1n1-p0/build/m1n1.bin",
-  "m1n1_bin_sha256": "a3accab2e941f666b4b8863eb7ffa4f775fd3d920a972315792db56c067a0dec",
+  "m1n1_bin_sha256": "314022a8732fd3343f5281001cbfd1a59a39ac518b38b5240b0ab00acb104979",
   "cargo_lock_sha256": "58dbc0049ee8065dd7992bbcdd45ec5e62608ec9bec996d2411802ad9ed408b1",
   "linker_wrapper_sha256": "d97bf90b885780a75b8900938dce182ae8a4cbfea044086cbc57869caa64ee93",
   "build_flags": [
@@ -14,7 +14,7 @@
     "EXTRA_CFLAGS=-DANS1_P0"
   ],
   "hardware_executed": false,
-  "execution_authorized": true,
+  "execution_authorized": false,
   "execution_policy": "HostReadOnlyExperimental",
   "preflight_verified": false,
   "acceptance": "unverified",

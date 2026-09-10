@@ -20,6 +20,7 @@ prefix = r'''
 #include <string.h>
 #include <stddef.h>
 typedef uint8_t u8; typedef uint32_t u32;
+#define ANS1_P0 1
 #define CDC_ACM_PIPE_MAX 2
 #define USB_REQUEST_CDC_GET_LINE_CODING 0x21
 #define USB_REQUEST_CDC_SET_LINE_CODING 0x20
@@ -48,6 +49,10 @@ typedef uint8_t u8; typedef uint32_t u32;
 #define usb_debug_printf(...) ((void)0)
 #define usb_error_printf(...) ((void)0)
 union usb_setup_packet {struct {u8 bmRequestType,bRequest;uint16_t wValue,wIndex,wLength;} raw;};
+enum { P0_EP0_SETUP_CONSUMED=BIT(0),P0_EP0_GET_HANDLER=BIT(1),P0_EP0_IN_ARMED=BIT(2),
+       P0_EP0_IN_COMPLETE=BIT(3),P0_EP0_STATUS_ARMED=BIT(4),
+       P0_EP0_STATUS_COMPLETE=BIT(5),P0_EP0_NEXT_SETUP=BIT(6) };
+static bool p0_is_get_line_coding(const union usb_setup_packet*s){return s->raw.bmRequestType==0xa1&&s->raw.bRequest==0x21&&s->raw.wValue==0&&s->raw.wIndex==2&&s->raw.wLength==7;}
 '''
 prefix += source[source.index('enum ep0_state {'):source.index('};', source.index('enum ep0_state {'))+2]
 prefix += r'''
@@ -57,12 +62,14 @@ typedef struct {
  const void *ep0_buffer; unsigned ep0_buffer_len;
  struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
+ u8 p0_ep0_trace;bool p0_get_line_coding_active;
 } dwc2_dev_t;
 static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
+static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
 static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
 static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
-static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){(void)d;(void)e;statuses++;}
+static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){statuses++;if(e==USB_LEP_CTRL_OUT)usb_dwc2_ep_hw_recv(d,e,64,1);}
 static void usb_dwc2_start_setup_phase(dwc2_dev_t*d){(void)d;setups++;}
 static void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d);
 static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_buffer_len==7);armed++;return 0;}
@@ -160,20 +167,27 @@ int main(void){
  usb_dwc2_ep_hw_recv(&d,0,7,1);
  assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  // The observed A1/21 interface-2 request: IN data, OUT status, next SETUP.
+ d.p0_ep0_trace=0;d.p0_get_line_coding_active=false;
  s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
  s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
  daint=BIT(16);outint=DWC2_DOEPINT_SETUP;
  published=false;
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ assert(d.p0_ep0_trace==(P0_EP0_SETUP_CONSUMED|P0_EP0_GET_HANDLER|P0_EP0_IN_ARMED));
  assert(d.ep0_buffer==d.pipe[1].cdc_line_coding && d.ep0_buffer_len==7);
  assert(published && !memcmp(in_payload,d.pipe[1].cdc_line_coding,7));
  assert(dma_addr && dma_size==(1U<<19|7));
  assert(in_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
+ assert(d.p0_ep0_trace==(P0_EP0_SETUP_CONSUMED|P0_EP0_GET_HANDLER|P0_EP0_IN_ARMED|P0_EP0_IN_COMPLETE|P0_EP0_STATUS_ARMED));
  daint=BIT(16);outint=1;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
+ assert(d.p0_ep0_trace==0x3f && d.p0_get_line_coding_active);
+ s.raw.bmRequestType=0;s.raw.bRequest=0;s.raw.wIndex=0;s.raw.wLength=0;
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.p0_ep0_trace==0x7f && !d.p0_get_line_coding_active);
  return 0;
 }
 '''

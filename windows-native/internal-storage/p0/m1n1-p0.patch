@@ -1523,10 +1523,105 @@ index fce0d5d..6091c33 100644
      usb_iodev->usage = USAGE_CONSOLE | USAGE_UARTPROXY;
      spin_init(&usb_iodev->lock);
 diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
-index 9220d62..9798226 100644
+index 9220d62..9dbb334 100644
 --- a/src/usb_dwc2.c
 +++ b/src/usb_dwc2.c
-@@ -820,27 +820,32 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
+@@ -41,6 +41,9 @@
+ #define STRING_DESCRIPTOR_MANUFACTURER 1
+ #define STRING_DESCRIPTOR_PRODUCT      2
+ #define STRING_DESCRIPTOR_SERIAL       3
++#ifdef ANS1_P0
++#define STRING_DESCRIPTOR_P0_EP0_TRACE 4
++#endif
+ 
+ #define CDC_DEVICE_CLASS 0x02
+ 
+@@ -147,8 +150,52 @@ typedef struct dwc2_dev {
+         u8 cdc_line_coding[7];
+     } pipe[CDC_ACM_PIPE_MAX];
+ 
++#ifdef ANS1_P0
++    u8 p0_ep0_trace;
++    bool p0_get_line_coding_active;
++#endif
++
+ } dwc2_dev_t;
+ 
++#ifdef ANS1_P0
++enum {
++    P0_EP0_SETUP_CONSUMED = BIT(0),
++    P0_EP0_GET_HANDLER = BIT(1),
++    P0_EP0_IN_ARMED = BIT(2),
++    P0_EP0_IN_COMPLETE = BIT(3),
++    P0_EP0_STATUS_ARMED = BIT(4),
++    P0_EP0_STATUS_COMPLETE = BIT(5),
++    P0_EP0_NEXT_SETUP = BIT(6),
++};
++
++static struct {
++    u8 bLength;
++    u8 bDescriptorType;
++    u16 bString[5];
++} PACKED p0_ep0_trace_descriptor = {
++    .bLength = 12,
++    .bDescriptorType = USB_STRING_DESCRIPTOR,
++    .bString = {'P', '0', 'E', '0', '0'},
++};
++
++static const struct usb_string_descriptor *p0_ep0_trace_string(dwc2_dev_t *dev)
++{
++    static const char hex[] = "0123456789ABCDEF";
++    u8 trace = dev->p0_ep0_trace;
++    dev->p0_get_line_coding_active = false;
++    p0_ep0_trace_descriptor.bString[3] = hex[trace >> 4];
++    p0_ep0_trace_descriptor.bString[4] = hex[trace & 0xf];
++    return (const struct usb_string_descriptor *)&p0_ep0_trace_descriptor;
++}
++
++static bool p0_is_get_line_coding(const union usb_setup_packet *setup)
++{
++    return setup->raw.bmRequestType == 0xa1 &&
++           setup->raw.bRequest == USB_REQUEST_CDC_GET_LINE_CODING &&
++           setup->raw.wValue == 0 && setup->raw.wIndex == 2 && setup->raw.wLength == 7;
++}
++#endif
++
+ u32 next_tx_fifo_addr = 0;
+ static const struct usb_string_descriptor str_manufacturer =
+     make_usb_string_descriptor("Asahi Linux");
+@@ -574,7 +621,8 @@ static void usb_build_serial(void)
+     str_serial = desc;
+ }
+ 
+-static void usb_cdc_get_string_descriptor(u32 index, const void **descriptor, u16 *descriptor_len)
++static void usb_cdc_get_string_descriptor(dwc2_dev_t *dev, u32 index, const void **descriptor,
++                                          u16 *descriptor_len)
+ {
+     switch (index) {
+         case STRING_DESCRIPTOR_LANGUAGES:
+@@ -594,6 +642,12 @@ static void usb_cdc_get_string_descriptor(u32 index, const void **descriptor, u1
+             *descriptor = str_serial;
+             *descriptor_len = str_serial->bLength;
+             break;
++#ifdef ANS1_P0
++        case STRING_DESCRIPTOR_P0_EP0_TRACE:
++            *descriptor = p0_ep0_trace_string(dev);
++            *descriptor_len = p0_ep0_trace_descriptor.bLength;
++            break;
++#endif
+         default:
+             *descriptor = NULL;
+             *descriptor_len = 0;
+@@ -619,7 +673,7 @@ usb_dwc2_handle_ep0_get_descriptor(dwc2_dev_t *dev,
+             descriptor_len = cdc_configuration_descriptor.configuration.wTotalLength;
+             break;
+         case USB_STRING_DESCRIPTOR:
+-            usb_cdc_get_string_descriptor(get_descriptor->index, &descriptor, &descriptor_len);
++            usb_cdc_get_string_descriptor(dev, get_descriptor->index, &descriptor, &descriptor_len);
+             break;
+         case USB_DEVICE_QUALIFIER_DESCRIPTOR:
+             descriptor = &usb_cdc_device_qualifier_descriptor;
+@@ -820,27 +874,38 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
  {
      int pipe = setup->raw.wIndex / 2;
  
@@ -1538,6 +1633,12 @@ index 9220d62..9798226 100644
  
      switch (setup->raw.bRequest) {
          case USB_REQUEST_CDC_GET_LINE_CODING:
++#ifdef ANS1_P0
++            if (p0_is_get_line_coding(setup)) {
++                dev->p0_ep0_trace |= P0_EP0_GET_HANDLER;
++                dev->p0_get_line_coding_active = true;
++            }
++#endif
 +            if (setup->raw.bmRequestType != 0xa1 || setup->raw.wValue ||
 +                setup->raw.wLength != 7)
 +                goto unsupported_setup_pkt;
@@ -1564,7 +1665,7 @@ index 9220d62..9798226 100644
              } else {
                  dev->pipe[pipe].ready = false;
                  usb_debug_printf("ACM device closed\n");
-@@ -850,14 +855,12 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
+@@ -850,14 +915,12 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
              break;
  
          case USB_REQUEST_CDC_SET_LINE_CODING:
@@ -1585,7 +1686,26 @@ index 9220d62..9798226 100644
              break;
  
          default:
-@@ -916,8 +919,21 @@ static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)
+@@ -906,18 +969,40 @@ static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)
+             break;
+ 
+         case USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE:
++#ifdef ANS1_P0
++            if (dev->p0_get_line_coding_active) {
++                dev->p0_ep0_trace |= P0_EP0_STATUS_COMPLETE;
++            }
++#endif
+         case USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE:
+             usb_dwc2_start_setup_phase(dev);
+             dev->ep0_state = USB_DWC2_EP0_STATE_SETUP_HANDLE;
+             break;
+ 
+         case USB_DWC2_EP0_STATE_DATA_SEND_DONE:
++#ifdef ANS1_P0
++            if (dev->p0_get_line_coding_active)
++                dev->p0_ep0_trace |= P0_EP0_IN_COMPLETE;
++#endif
+             dev->ep0_state = USB_DWC2_EP0_STATE_DATA_RECV_STATUS;
              break;
  
          case USB_DWC2_EP0_STATE_DATA_RECV_DONE:
@@ -1607,7 +1727,7 @@ index 9220d62..9798226 100644
              dev->ep0_state = USB_DWC2_EP0_STATE_DATA_SEND_STATUS;
              break;
  
-@@ -1089,6 +1105,10 @@ static int usb_dwc2_start_status_phase(dwc2_dev_t *dev, u8 ep)
+@@ -1089,6 +1174,10 @@ static int usb_dwc2_start_status_phase(dwc2_dev_t *dev, u8 ep)
  static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
  {
      u32 daint = read32(dev->regs + DWC2_DAINT);
@@ -1618,7 +1738,7 @@ index 9220d62..9798226 100644
      if (daint && !(daint & (BIT(16) | BIT(0)))) // timing requirements
          usb_debug_printf("handle_interrupts_ep: DAINT = %x\n", daint);
      // dispatch handler for each endpoints
-@@ -1096,7 +1116,8 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1096,7 +1185,8 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
          u32 diepint = read32(dev->regs + DWC2_DIEPINT(0));
          write32(dev->regs + DWC2_DIEPINT(0), diepint);
          usb_debug_printf("ep0_in_handle_interrupt:  DWC2_DIEPINT(0)=%x\n", diepint);
@@ -1628,7 +1748,7 @@ index 9220d62..9798226 100644
              usb_dwc2_ep0_handle_xfer_done(dev);
              usb_dwc2_ep0_handle_xfer_not_ready(dev);
          }
-@@ -1104,7 +1125,7 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1104,25 +1194,37 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
      }
  
      if (daint & BIT(16 + 0)) { // ep0_out
@@ -1637,8 +1757,13 @@ index 9220d62..9798226 100644
          write32(dev->regs + DWC2_DOEPINT(0), doepint);
          // usb_debug_printf("ep0_out_handle_interrupt: DWC2_DOEPINT(0)=%x\n", doepint);
          bool setup_packet_recvd = doepint & DWC2_DOEPINT_STUP_PKT_RCVD;
-@@ -1112,17 +1133,20 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+         bool setup_phase_done = doepint & DWC2_DOEPINT_SETUP;
          if (setup_packet_recvd || setup_phase_done) {
++#ifdef ANS1_P0
++            if (dev->p0_get_line_coding_active)
++                dev->p0_ep0_trace |= P0_EP0_NEXT_SETUP;
++            dev->p0_get_line_coding_active = false;
++#endif
              // usb_debug_printf("got (part of) setup_packet DMA done now with %s, doepint=%x\n",
              // ep0_state_names[dev->ep0_state], doepint);
 -            if (dev->ep0_state == USB_DWC2_EP0_STATE_SETUP_HANDLE)
@@ -1652,6 +1777,10 @@ index 9220d62..9798226 100644
              // ep0_state_names[dev->ep0_state], doepint);
 -            assert(dev->ep0_state == USB_DWC2_EP0_STATE_SETUP_PENDING);
 +            dma_rmb();
++#ifdef ANS1_P0
++            if (p0_is_get_line_coding(dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer))
++                dev->p0_ep0_trace |= P0_EP0_SETUP_CONSUMED;
++#endif
 +            usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_IN, 0);
 +            usb_dwc2_ep_set_stall(dev, USB_LEP_CTRL_OUT, 0);
              dev->ep0_state = USB_DWC2_EP0_STATE_SETUP_HANDLE;
@@ -1662,7 +1791,7 @@ index 9220d62..9798226 100644
              if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE) {
                  // usb_debug_printf("DWC2_DOEPINT_XFER_COMPL now with %s, doepint=%x\n",
                  // ep0_state_names[dev->ep0_state], doepint);
-@@ -1136,7 +1160,10 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
+@@ -1136,7 +1238,10 @@ static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)
                  usb_error_printf(
                      "BAD STATUS with COMPL now with %s, doepint=%x DWC2_DOEPCTL(0)=%lx\n",
                      ep0_state_names[dev->ep0_state], doepint, dev->regs + DWC2_DOEPCTL(0));
@@ -1674,7 +1803,19 @@ index 9220d62..9798226 100644
                  usb_dwc2_ep0_handle_xfer_not_ready(dev);
                  // hexdump(dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer, 0x20);
                  // usb_dwc2_ep_set_stall(dev, 0, 1);
-@@ -1229,7 +1256,10 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1222,6 +1327,11 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+ 
+     dma_rmb();
+     u8 pep = phyEndpoints[ep];
++#ifdef ANS1_P0
++    if (ep == USB_LEP_CTRL_OUT && dev->p0_get_line_coding_active &&
++        dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV_STATUS)
++        dev->p0_ep0_trace |= P0_EP0_STATUS_ARMED;
++#endif
+ 
+     // write the lower 32 bits the high bit is handled at the PHY level
+     write32(dev->regs + DWC2_DOEPDMA(pep), (uintptr_t)dev->endpoints[ep].xfer_buffer);
+@@ -1229,7 +1339,10 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
      if (!ep) { // EP0
          // usb_debug_printf("usb_dwc2_ep_hw_recv with EP0out now:  state=%s\n",
          // ep0_state_names[dev->ep0_state]);
@@ -1686,9 +1827,14 @@ index 9220d62..9798226 100644
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
          else
              set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP);
-@@ -1248,7 +1278,8 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1247,8 +1360,13 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+         usb_error_printf("usb_dwc2_ep_hw_send with dir_out endpoint =%u E \n", phyEndpoints[ep]);
          return;
      }
++#ifdef ANS1_P0
++    if (ep == USB_LEP_CTRL_IN && dev->p0_get_line_coding_active && hw_xfer_size == 7)
++        dev->p0_ep0_trace |= P0_EP0_IN_ARMED;
++#endif
  
 -    dma_rmb();
 +    /* Publish CPU-written IN payload before enabling DMA reads. */
@@ -1696,7 +1842,7 @@ index 9220d62..9798226 100644
      write32(dev->regs + DWC2_DIEPDMA(pep), (uintptr_t)dev->endpoints[ep].xfer_buffer);
      write32(dev->regs + DWC2_DIEPTSIZ(pep), (packet_count << 19) | hw_xfer_size);
      set32(dev->regs + DWC2_DIEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
-@@ -1259,6 +1290,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1259,6 +1377,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
  
  static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)
  {

@@ -26,7 +26,7 @@ manifest = {
     'cargo_lock_sha256': sha(SRC / 'rust/Cargo.lock'),
     'linker_wrapper_sha256': sha(ROOT / 'windows-native/msys-aarch64-ld-wrapper.sh'),
     'build_flags': ['USE_CLANG=1', 'ARCH=aarch64-none-elf', 'CHAINLOADING=1', 'EXTRA_CFLAGS=-DANS1_P0'],
-    'hardware_executed': False, 'execution_authorized': True,
+    'hardware_executed': False, 'execution_authorized': False,
     'execution_policy': 'HostReadOnlyExperimental',
     'preflight_verified': False,
     'acceptance': 'unverified',
