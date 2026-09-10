@@ -19,7 +19,7 @@ if ($Login -and $RestoreState) {
     throw 'Choose either -Login or -RestoreState, not both.'
 }
 
-$release = '0.152.1'
+$release = '0.153.4'
 $tag = "rust-v$release"
 $artifactRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\artifacts\codex-runtime'))
 $caExtractRoot = Join-Path $artifactRoot 'ca-extracted'
@@ -27,17 +27,17 @@ $caExtractRoot = Join-Path $artifactRoot 'ca-extracted'
 $assets = @(
     [pscustomobject]@{
         Name = 'codex-aarch64-unknown-linux-musl.tar.gz'
-        Sha256 = 'B65F964600972A948B898F4782E316A741A1B81C044622AA6BDF37CA4525DEBC'
+        Sha256 = '5CDA6182BD94C3A30F2EB63A495489EBF7F691FDDB14D70F48C6C1A5071B6CDE'
         Uri = "https://github.com/openai/codex/releases/download/$tag/codex-aarch64-unknown-linux-musl.tar.gz"
     },
     [pscustomobject]@{
         Name = 'codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz'
-        Sha256 = '21C4A1AFB132A5CF69AA1AC4262D50728EA73894F6FADA11364E64C4887343F3'
+        Sha256 = 'D8047B8D33370D6090E729D27EB76DE60A2686BAA1C143C138C9B05DC70D813B'
         Uri = "https://github.com/openai/codex/releases/download/$tag/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz"
     },
     [pscustomobject]@{
         Name = 'bwrap-aarch64-unknown-linux-musl.tar.gz'
-        Sha256 = 'B1428C448E5A4AF6E0C1346873DAABB70D5943355A7C8460F02038A56A5806F3'
+        Sha256 = '2C6EA97DFB0A936B695ECE6DF058B89D4DFD53774A9AD852B3E4C98E6BBDFD20'
         Uri = "https://github.com/openai/codex/releases/download/$tag/bwrap-aarch64-unknown-linux-musl.tar.gz"
     },
     [pscustomobject]@{
@@ -113,17 +113,17 @@ ntpd -n -q -p time.cloudflare.com
 mkdir -p /opt/bin /etc/ssl/certs /run/codex-home /run/work
 chmod 0700 /run/codex-home
 wget -q -O /run/codex.tar.gz http://__HOST__:__PORT__/codex-aarch64-unknown-linux-musl.tar.gz
-echo 'b65f964600972a948b898f4782e316a741a1b81c044622aa6bdf37ca4525debc  /run/codex.tar.gz' | sha256sum -c -
+echo '5cda6182bd94c3a30f2eb63a495489ebf7f691fddb14d70f48c6c1a5071b6cde  /run/codex.tar.gz' | sha256sum -c -
 tar -xzf /run/codex.tar.gz -C /opt/bin
 mv /opt/bin/codex-aarch64-unknown-linux-musl /opt/bin/codex
 rm /run/codex.tar.gz
 wget -q -O /run/codex-host.tar.gz http://__HOST__:__PORT__/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz
-echo '21c4a1afb132a5cf69aa1ac4262d50728ea73894f6fada11364e64c4887343f3  /run/codex-host.tar.gz' | sha256sum -c -
+echo 'd8047b8d33370d6090e729d27eb76de60a2686baa1c143c138c9b05dc70d813b  /run/codex-host.tar.gz' | sha256sum -c -
 tar -xzf /run/codex-host.tar.gz -C /opt/bin
 mv /opt/bin/codex-code-mode-host-aarch64-unknown-linux-musl /opt/bin/codex-code-mode-host
 rm /run/codex-host.tar.gz
 wget -q -O /run/bwrap.tar.gz http://__HOST__:__PORT__/bwrap-aarch64-unknown-linux-musl.tar.gz
-echo 'b1428c448e5a4af6e0c1346873daabb70d5943355a7c8460f02038a56a5806f3  /run/bwrap.tar.gz' | sha256sum -c -
+echo '2c6ea97dfb0a936b695ece6df058b89d4dfd53774a9ad852b3e4c98e6bbdfd20  /run/bwrap.tar.gz' | sha256sum -c -
 tar -xzf /run/bwrap.tar.gz -C /opt/bin
 mv /opt/bin/bwrap-aarch64-unknown-linux-musl /opt/bin/bwrap
 rm /run/bwrap.tar.gz
