@@ -1,13 +1,16 @@
 # P0-USB: transport only
 
-The current measured boundary is Session v: standard enumeration, the first
-GET_LINE_CODING, DTR=0 and SET_LINE_CODING all completed successfully on the
-Windows host, then the immediately following GET_LINE_CODING stalled with zero
-bytes. The host-completion-to-dispatch interval was about 5.2 microseconds; the
-second GET dispatch-to-STALL-completion interval was about 8.919 milliseconds.
-Neither interval exposes the device's internal interrupt order. COM open and
-P_NOP remain unverified, and ANS initialization/NAND access remain unexecuted.
-HostReadOnlyExperimental and RamOnly defaults remain unchanged.
+The current measured boundary is Session y. With the stale-IN-completion fix
+payload, standard enumeration, the first GET_LINE_CODING, DTR=0 and
+SET_LINE_CODING all completed successfully on the Windows host, but the
+immediately following GET_LINE_CODING still stalled with zero bytes. Its
+preceding SET-completion-to-GET-dispatch interval was 9 microseconds and the
+GET-dispatch-to-STALL-completion interval was 8.9862 milliseconds. This is
+decision result B: the software fix is insufficient for the physical boundary,
+not proof that its modeled race is impossible. Neither host interval exposes
+the device's internal interrupt order. COM open and P_NOP remain unverified,
+and ANS initialization/NAND access remain unexecuted. HostReadOnlyExperimental
+and RamOnly defaults remain unchanged.
 
 Historically, the first recorded session stopped at Windows `SetCommState`
 error 31 before the first proxy packet and had no USB capture. That historical
@@ -1438,3 +1441,59 @@ The summarized failure record is
 `C972EB0E14C3243D87D7DD148B77F43F4545D5DE653DF0A3E74EF6343719409C`.
 Session x is closed; another attempt requires fresh DFU, a new directory, and
 new approval.
+
+## Session y: stale-IN fix physical result B
+
+The user reported fresh DFU and approved the three commands for Session y.
+Checkm8 passed once. Pongo then passed once, including its post-enumeration
+identity, `libusbK`, and ordered-location checks. The passive wrapper started
+ETW before the one payload transfer. The approved payload
+`39543DDB1A2D88C7950AF67506821846D0D1C08BCDF5E606D9B040C6D703740B`
+transferred and enumerated as the expected usbser m1n1 target at the saved
+location. The 35-second observation and final evidence capture passed.
+
+The same CDC sequence as Session v occurred on interface 2 and one control
+pipe. The first GET_LINE_CODING completed successfully with seven bytes,
+SET_CONTROL_LINE_STATE completed successfully with DTR=0, and SET_LINE_CODING
+completed successfully with seven bytes. The immediately following
+GET_LINE_CODING completed with NT `0xC0000001`, USBD `0xC0000004`, and zero
+bytes. The SET host completion to second-GET dispatch interval was 9
+microseconds; second-GET dispatch to STALL completion was 8.9862 milliseconds.
+These are host-side event intervals and do not establish bus packet spacing or
+device interrupt order.
+
+Before the CDC boundary, device/configuration/string descriptors and
+SET_CONFIGURATION succeeded; the product string again completed with 82 bytes.
+After the second GET stall, the first language string request was dispatched
+8.2401 milliseconds later, waited about five seconds, and was host-canceled.
+Repeated standard string cancellations followed, with the last request
+unmatched at trace stop. Thus the physical outcome is result B, not A or D: the
+reviewed stale-IN-completion fix did not remove the same observed boundary.
+
+The regression still demonstrates a real software-state problem under its
+modeled ordering, but Session y shows that fixing it is insufficient here. It
+does not prove that the ordering never occurs or identify a different device
+STALL path. ETW still cannot expose the device-side completion/SETUP ordering
+or name the STALL call. No second speculative fix was mixed into this test.
+
+The wrapper's counters are zero for tool descriptor/index-4 requests, COM
+opens, proxy requests, P_NOP, ANS and NAND requests. There was no automatic
+retry and no operation followed the observation. COM configuration and P_NOP
+are not validated.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Checkm8 JSON | `E287082978E2DCB1A5C6EA699E7CAC29B1234B7E735EA7766965B48E1B705156` |
+| Pongo JSON | `979C22DD9B3A194DA9B7B23A8DCA5343F6D94B6171F10F28ADB81B1C39AC5FE7` |
+| Payload JSON | `2F9104488ED96FAC7D0271505F6C50ECAB8F37C9186A07FC1AEED80A6C9842DC` |
+| session JSON | `CCF0D3B87803B62F2B4590C6A6C787A8A670C9061473418C31BA96517254887B` |
+| phases JSONL | `32BE330EA15265D26488A0A14768DB3572FAE93CD771F05D23995B69EC4F3DAC` |
+| ETL | `C7FF8C0FF9796F7DF81270B310324F552445C8D83FC1C5ED90AECB77B3B5D546` |
+| XML | `F1900FDAC9AB35F4A575DB541152D8B946E18EDF465FF929CAEE59D94E2F2101` |
+| CDC analysis JSON | `75B2181855FF1616DB337A1504C562E2ED72C1A960426F02A697F42AABCD8C30` |
+| result summary | `6A523324D701B357085BB756369391A352B5EDEE53F249A182E1469A2426D7CD` |
+
+The result summary is preserved at
+`artifacts/p0-usb/session-y-ep0-stale-in/RESULT.md`. Session y is complete and
+must not be rerun. Further work should return to offline code/trace review and
+must not proceed directly to COM/P_NOP or ANS/NAND.
