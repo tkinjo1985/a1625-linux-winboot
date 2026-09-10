@@ -713,3 +713,20 @@ the exact proposed commands, each gated on the preceding result, are:
 These commands are not valid against the currently observed 1209:316D state;
 the Checkm8 gate requires one clean 05AC:1227 DFU device with CPID 7000, BDID
 34, configured ECID `000C14642E028026`, `libusbK`, and the reviewed location.
+
+## Session s: pre-Checkm8 driver-gate stop
+
+The user manually entered DFU and explicitly approved the five commands listed
+above. The first command was invoked once. Its pre-execution identity gate found
+exactly one clean 05AC:1227 device with CPID 7000, BDID 34, ECID
+`000C14642E028026`, status OK, and the expected USB(4)/HS04 location, but its
+service was `WINUSB` rather than the required `libusbK`. The wrapper stopped at
+line 19 with `Identity/driver gate failed: expected libusbK, got WINUSB` before
+starting the Checkm8 process.
+
+No Checkm8 attempt reached the device, and no Pongo, payload, inventory, arm,
+COM open, autonomous disconnect, report, P_NOP, ANS or NAND operation ran. The
+new session directory exists but contains no stage record because the gate
+failed before record creation; it must not be reused. No retry or driver change
+was performed. A later attempt requires an exact-instance driver correction,
+a different new session directory, fresh DFU confirmation and new approval.
