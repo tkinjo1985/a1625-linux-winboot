@@ -54,25 +54,26 @@ typedef struct {
  struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
 } dwc2_dev_t;
-static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed;
+static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
+static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
 static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
 static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){(void)d;(void)e;statuses++;}
 static void usb_dwc2_start_setup_phase(dwc2_dev_t*d){(void)d;setups++;}
 static void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d);
-static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t*d){(void)d;return 0;}
 static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_buffer_len==7);armed++;return 0;}
 static void dma_rmb(void){}
 static bool published;
 static void dma_wmb(void){published=true;}
 static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;return remaining;}
-static void write32(unsigned a,unsigned v){if(a==60)assert(published);(void)v;}
+static void write32(unsigned a,unsigned v){if(a==60){assert(published);dma_addr=v;}if(a==70)dma_size=v;}
 static unsigned control_bits;
-static void set32(unsigned a,unsigned v){(void)a;control_bits=v;}
+static void set32(unsigned a,unsigned v){if(a==80)in_control_bits=v;else control_bits=v;}
 static const u8 phyEndpoints[]={0,0x80};
 '''
 body = function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
 assert body
+body += function('static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t *dev)')
 body += '\nstatic void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d){usb_dwc2_ep0_handle_class(d,d->endpoints[0].xfer_buffer);}\n'
 body += function('static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)')
 body += function('static void usb_dwc2_ep0_handle_xfer_not_ready(dwc2_dev_t *dev)')
@@ -88,7 +89,8 @@ body += function('static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw
 body += function('static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 packet_count)')
 main = r'''
 int main(void){
- dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};d.endpoints[0].xfer_buffer=payload;
+ dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};u8 in_payload[64]={0};
+ d.endpoints[0].xfer_buffer=payload;d.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet s={.raw={0x21,0x20,0,0,7}};
  for(unsigned p=0;p<2;p++){
   s.raw.wIndex=p*2;usb_dwc2_ep0_handle_class(&d,&s);
@@ -157,9 +159,13 @@ int main(void){
  s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
  s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
  daint=BIT(16);outint=DWC2_DOEPINT_SETUP;
+ published=false;
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
  assert(d.ep0_buffer==d.pipe[1].cdc_line_coding && d.ep0_buffer_len==7);
+ assert(published && !memcmp(in_payload,d.pipe[1].cdc_line_coding,7));
+ assert(dma_addr && dma_size==(1U<<19|7));
+ assert(in_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
  daint=BIT(16);outint=1;usb_dwc2_handle_interrupts_ep(&d);
