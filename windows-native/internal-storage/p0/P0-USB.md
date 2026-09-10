@@ -918,3 +918,62 @@ Any failure stops further requests. Success also stops: no COM, index 4, P_NOP,
 proxy, ANS or NAND follows. Save session JSON, phases, raw bytes, ETL/XML and
 hashes. This trial needs fresh clean-DFU confirmation and explicit approval;
 this preparation authorizes no hardware action.
+
+## Session u: standard product-descriptor control result
+
+The user manually confirmed a fresh DFU state and explicitly approved the five
+Session u commands. The commands were then run one device-affecting stage at a
+time. The saved Checkm8, PongoOS and diagnostic m1n1 RAM-payload stages all
+passed their existing identity, location, artifact and safety gates. The
+payload SHA-256 was
+`5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D`.
+The immediately collected inventory contained exactly one expected
+`1209:316D`/`usbser` instance on the saved USB(4)/HS04 location. These facts do
+not authorize reuse of this boot for another control request.
+
+The standard product-descriptor trial issued its one allowed tool request and
+then stopped with class D, `HOST_DEADLINE_EXCEEDED`. The durable phase log shows
+successful hub open and connection information return (47 ms), followed by
+`descriptor_entered` for exactly `80/06`, `wValue=0302`, `wIndex=0409`,
+`wLength=0080`. There is no `descriptor_returned`, no raw descriptor, and no
+API-returned error. Stdout and stderr are empty. The wrapper made no retry and
+kept the ETW session passively for the specified 35 seconds.
+
+ETW independently contains one dispatch matching that exact 128-byte request.
+Its completion is about 4.965 seconds later with IRP status `0xC0000120`, USBD
+status `0xC0010000`, and transfer length zero. That timing coincides with the
+wrapper's five-second child deadline and is therefore treated as cancellation
+of the outstanding tool request, not as an independently observed device
+response. ETW also contains an immediately preceding completion for a
+different product request whose `wLength` is `00FF`. Although the kernel reused
+the same URB pointer, the differing SETUP lengths mean those events must not be
+paired. The `0080` dispatch and completion form the applicable pair.
+
+This result shows that the current parent-hub descriptor API path also fails to
+return a live value for the advertised standard product string; the failure is
+therefore not specific to private index 4 or P0E2 parsing. It does not establish
+that the device recognized SETUP, entered a descriptor handler, or failed a
+particular EP0/DMA phase. Nor does the PnP product text prove a live response,
+because it can be enumeration metadata retained by Windows. The remaining
+possibilities include a common device-side EP0 problem and a host/hub IOCTL
+path problem; Session u alone does not distinguish them.
+
+No COM open, index-4 request, proxy request, P_NOP, ANS operation or NAND
+operation occurred. Counts persisted by the trial are product descriptor
+requests 1 and all those prohibited/follow-on operations 0. No autonomous
+disconnect was armed by index 2 in the payload source, and unrelated ETW bus
+traffic is not evidence of an A1625 disconnect or re-enumeration. No additional
+hardware operation was performed after this result.
+
+| Session u evidence | SHA-256 |
+| --- | --- |
+| ETL | `A776CD99791634E926BF4187ED44C14E4BDB2627814A5B94FE85D97DC99504C6` |
+| XML | `0FD24DA6DD9114FC3E36E32DB1CAEC82E268BAB3F80DE9A1505433D8FDFB0222` |
+| trial session JSON | `78771D9EF3DF3F7BB64DCA69279F88AF544C85C894C41332054A0D4EE15BAFBD` |
+| reader session JSON | `A676CB8A5B17E4E18CC8A4FCB51B72309DE714D5075B064433F990DA26AF21A6` |
+| phase JSONL | `6DFDBAAD9AAC6EA1E5391DE71372E5B9115A4613D5F0012A60AF1BEA4B6DA101` |
+
+Session u is complete and stopped safely. A further test needs a separately
+reviewed plan, a new session directory and new explicit approval; it must not
+repeat the already failed product or post-failure index-4 read without a new
+source of evidence.
