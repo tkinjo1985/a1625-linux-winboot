@@ -24,12 +24,12 @@ def sha256(path):
 # no function-driver/COM handle, write path, reset or proxy transport.
 assert source.count('IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX') == 1
 assert source.count('IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION') == 1
-assert 'request->SetupPacket.bmRequest = 0x80;' in source
-assert 'request->SetupPacket.bRequest = 0x06;' in source
-assert '(USB_STRING_DESCRIPTOR_TYPE << 8) | 4' in source
-assert 'request->SetupPacket.wLength = 46;' in source
-assert 'text[3] != \'2\'' in source
-assert 'checksum != expected' in source
+assert 'r->SetupPacket.bmRequest=0x80;' in source
+assert 'r->SetupPacket.bRequest=0x06;' in source
+assert '(USB_STRING_DESCRIPTOR_TYPE<<8)|(product?2:4)' in source
+assert 'product?MAX_DESCRIPTOR:46' in source
+assert '(product?2:4)' in source
+assert 'descriptor_entered' in source and 'descriptor_returned' in source
 for forbidden in ('SetCommState', 'WriteFile(', 'IOCTL_USB_RESET',
                   'IOCTL_USB_HUB_CYCLE_PORT', 'libusb_', 'P_NOP'):
     assert forbidden not in source
@@ -41,7 +41,7 @@ for required in ("InstanceId -eq $identity.instance_id", "-ne 'usbser'",
                  'Compare-Object $savedLocation $location -SyncWindow 0',
                  "throw 'Output directory already exists; no automatic repeat'",
                  '$record.attempts=1', '$process.WaitForExit(5000)',
-                 "[ValidateSet('Arm','Report')]", "throw 'Diagnostic arm was not confirmed'",
+                 "[ValidateSet('Arm','Report','Product')]", "throw 'Diagnostic arm was not confirmed'",
                  "throw 'Report is stale, mismatched, or not frozen'",
                  'com_opens=0;proxy_requests=0;ans_requests=0;nand_requests=0'):
     assert required in wrapper

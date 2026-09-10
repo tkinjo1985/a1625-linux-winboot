@@ -803,3 +803,118 @@ cannot be used until a different, independently verified pre-COM arm mechanism
 exists. Repeating index 4, opening COM on this boot, or treating PnP presence as
 arm success is prohibited. No further hardware step is authorized by this
 result.
+
+## Standard product-descriptor control preparation (not executed)
+
+This offline preparation is based on session t diagnostic-u. It does not reuse
+that possibly armed boot and performed no USB request, COM open, boot,
+disconnect/re-enumeration or driver change.
+
+### Saved-helper review
+
+The diagnostic-u session hashes match commit `e373d1a` versions of
+`Read-Ep0Trace.c`, `Invoke-Ep0TraceRead.ps1`, the executable and manifest. The
+wrapper derives port 4 from the sole ordered location ending in `USB(4)`, uses
+the saved parent hub, and gates exact InstanceId, 1209:316D, `usbser`, product,
+parent and ordered location. The helper opens the single
+`GUID_DEVINTERFACE_USB_HUB` path synchronously, validates
+`IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX`, then calls
+`IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION` once with one zeroed
+header-plus-data buffer for both input and output.
+
+No clear functional defect was found in the old structure size, initialization,
+connection index or IOCTL buffer sizing. WDK 10.0.28000.0 `usbioctl.h` defines
+the trailing `USB_DESCRIPTOR_REQUEST.Data[0]` layout. Microsoft documents this
+as a user-mode hub request and its caller-provided `wValue`, `wIndex` and
+`wLength`. The official USBView sample uses the same one-buffer arrangement
+and checks `bLength == bytesReturned - sizeof(request)`.
+
+The old reporting did have an observability defect: progress existed only on
+buffered stdout/stderr, with no durable marker immediately before the blocking
+call. Thus the forcibly terminated process's `descriptor` fragment does not
+show that the API returned an error. Child termination also does not prove
+kernel-I/O cancellation or device-side termination.
+
+Primary references: local WDK `shared/usbioctl.h`, Microsoft Learn
+[`IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/usbioctl/ni-usbioctl-ioctl_usb_get_descriptor_from_node_connection),
+[`USB_DESCRIPTOR_REQUEST`](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/usbioctl/ns-usbioctl-_usb_descriptor_request),
+and Microsoft's
+[`USBView GetStringDescriptor`](https://github.com/microsoft/Windows-driver-samples/blob/main/usb/usbview/enum.c).
+
+### Selected control and exact request
+
+The only control is the advertised product string. Payload source sets
+`iProduct=2`, supplies index 2 as `"m1n1 uartproxy " BUILD_TAG`, and advertises
+LANGID `0x0409`; saved inventory supplies the exact expected text. The request
+is `bmRequestType=0x80`, `bRequest=0x06`, `wValue=0x0302`, `wIndex=0x0409`,
+`wLength=128`. The source value fits the fixed buffer. This one maximum-sized
+request avoids header-plus-full probing and matches USBView's approach. There
+is no index scan, fallback or second request.
+
+Only descriptor index 4 calls `p0_ep0_trace_string`; index 2 cannot arm the
+existing 45-second timer. No device-side change is made.
+
+### Minimal host change and offline results
+
+The helper now creates an unbuffered JSONL phase log before hub open. It records
+hub discovery/open, connection-info entry/return, descriptor entry/return,
+monotonic times, exact request, returned length and the immediately captured
+error (`0` on success). Raw bytes are saved separately before interpretation.
+If the synchronous API never returns, no stale error is invented. The wrapper
+persists `HOST_DEADLINE_EXCEEDED`, phases and observed request count in
+`finally`, and separates Product UTF-16 validation from P0E2 parsing.
+
+`Invoke-StandardDescriptorTrial.ps1` inherits the current PowerShell, starts
+ETW first and issues only Product mode. It keeps ETW two seconds after success;
+after the five-second helper deadline it observes passively for 35 seconds,
+covering session r's roughly 30-second completion without another request.
+It contains no index-4, COM, proxy, reset, driver, P_NOP, ANS or NAND action.
+
+The helper builds with GCC C11 `-Wall -Wextra -Werror`; all 18 P0 host tests
+pass. New offline cases cover valid response/raw preservation, returned API
+error, non-return/timeout phase, short/malformed response, pre-request failure,
+exception persistence, one-request policy and prohibited-operation absence.
+Mocks do not prove device response, kernel cancellation, ETW correlation or
+cache behavior.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| unchanged payload | `5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D` |
+| unchanged device patch | `BD9734C382F1339FDE61EF70A52FB1A179F2063491B823895ABC70F299A66BAC` |
+| helper source | `43AF90FD7B6F3253837F7AA6C8F34348D7704F3024526CE5C5835FC63569B738` |
+| helper executable | `9871F936F81A0E288171C01BF2E7AA01D90FFC2F1EA7E1124C81DD86535D1E3E` |
+| reader wrapper | `D430D3BAAFA256149B14986ABCE990D7000CD303E16DE0976EEAA62B78E7B3A1` |
+| standard-trial wrapper | `52ACD2382E86C414ABC89368F2783F2CA9AE8F47825587BA53FC628BD4FC37F7` |
+| reader manifest | `FADD1D216BCAF3F51B3D4AA3AB9ED1F5283E3B65C3D626145412E91D756EFD8B` |
+| payload manifest | `669AD4AE1A60D811547E6C2B81132A65EAF2DEC2CEA7CE4B94E1BE0A4BE4464D` |
+
+### One future trial
+
+Do not reuse session t. Manually power-cycle, enter clean DFU, and bind only
+the exact DFU/YOLO instances to `libusbK` when required by existing gates. Use
+new directory `artifacts/p0-usb/session-u-standard-product`; stop after each
+command unless its saved result passes:
+
+```powershell
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Checkm8 -OutputDirectory artifacts/p0-usb/session-u-standard-product
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Pongo -OutputDirectory artifacts/p0-usb/session-u-standard-product
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Payload -OutputDirectory artifacts/p0-usb/session-u-standard-product -ApprovedPayloadSha256 5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D
+& .\windows-native\internal-storage\p0\Collect-TransportInventory.ps1 -OutputPath artifacts/p0-usb/session-u-standard-product/before-control.json
+& .\windows-native\internal-storage\p0\Invoke-StandardDescriptorTrial.ps1 -IdentityPath artifacts/p0-usb/session-u-standard-product/before-control.json -OutputDirectory artifacts/p0-usb/session-u-standard-product/product-control -ApprovedPayloadSha256 5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D
+```
+
+The last command issues one tool-originated request; Windows automatic traffic
+is separately identified in ETW. Interpret results as follows:
+
+| Class | Permitted conclusion |
+| --- | --- |
+| A: exact raw/product and corresponding successful ETW completion | this standard path worked then; not index 4 or CDC GET success |
+| B: exact value but cache cannot be excluded | host API returned a value; live EP0 response unproved |
+| C: API returned error | preserve API/error/length; do not generalize to all EP0 |
+| D: five-second deadline | host timeout; device internal state UNKNOWN; retain ETW to 35 seconds |
+| E: pre-request gate/process failure | tool USB request count 0; not a USB result |
+
+Any failure stops further requests. Success also stops: no COM, index 4, P_NOP,
+proxy, ANS or NAND follows. Save session JSON, phases, raw bytes, ETL/XML and
+hashes. This trial needs fresh clean-DFU confirmation and explicit approval;
+this preparation authorizes no hardware action.

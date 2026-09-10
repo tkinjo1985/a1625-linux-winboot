@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$IdentityPath,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [ValidateSet('Arm','Report')][string]$Mode='Arm',
+    [ValidateSet('Arm','Report','Product')][string]$Mode='Arm',
     [string]$ArmRecordPath
 )
 $ErrorActionPreference='Stop'
@@ -36,6 +36,7 @@ $outFull=[IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if(-not $outFull.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Output directory must stay inside repository'}
 New-Item -ItemType Directory -Path $outFull | Out-Null
 $stdout=Join-Path $outFull 'stdout.txt';$stderr=Join-Path $outFull 'stderr.txt'
+$phaseLog=Join-Path $outFull 'phases.jsonl';$rawPath=Join-Path $outFull 'descriptor.raw'
 $record=[ordered]@{mode=$Mode;status='starting';attempts=0;
     com_opens=0;proxy_requests=0;ans_requests=0;nand_requests=0;
     identity=$identity;live_location=$location;hub_instance=$identity.parent;connection_port=$port;
@@ -45,15 +46,32 @@ $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $recordPath -Encodi
 $process=$null
 try{
     $record.attempts=1
-    $process=Start-Process -FilePath $reader -ArgumentList @($identity.parent,[string]$port) -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $descriptorMode=if($Mode -eq 'Product'){'product'}else{'p0e2'}
+    $process=Start-Process -FilePath $reader -ArgumentList @($identity.parent,[string]$port,$descriptorMode,$phaseLog,$rawPath) -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     if(-not $process.WaitForExit(5000)){
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         [void]$process.WaitForExit(5000)
-        throw 'EP0 trace descriptor read exceeded 5-second deadline; no retry'
+        $record.result_class='HOST_DEADLINE_EXCEEDED'
+        throw 'Descriptor API did not return before the 5-second host deadline; no retry'
     }
     $record.exit_code=$process.ExitCode
     if($process.ExitCode -ne 0){throw "EP0 trace reader failed: $($process.ExitCode)"}
     $result=Get-Content -LiteralPath $stdout -Raw | ConvertFrom-Json
+    $bytes=[IO.File]::ReadAllBytes($rawPath)
+    if($bytes.Count -lt 2 -or $bytes[0] -gt $bytes.Count -or ($bytes[0] -band 1)){throw 'Malformed raw string descriptor'}
+    $text=[Text.Encoding]::Unicode.GetString($bytes,2,$bytes[0]-2)
+    $record.transfer=$result;$record.raw_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $rawPath).Hash
+    if($Mode -eq 'Product'){
+        if($result.index -ne 2 -or $text -ne $identity.product){throw 'Product descriptor does not match saved identity'}
+        $record.product=$text;$record.result_class='VALID_PRODUCT_VALUE';$record.status='passed'
+        return
+    }
+    if($text -notmatch '^P0E2([0-9A-F]{8})([0-9A-F]{4})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})$'){throw 'Malformed P0E2 result'}
+    $result=[pscustomobject]@{format='P0E2';boot_id=[Convert]::ToUInt32($Matches[1],16);generation=[Convert]::ToUInt16($Matches[2],16);trace=[Convert]::ToByte($Matches[3],16);flags=[Convert]::ToByte($Matches[4],16);checksum=[Convert]::ToByte($Matches[5],16)}
+    $check=($result.boot_id -bxor ($result.boot_id -shr 8) -bxor ($result.boot_id -shr 16) -bxor
+            ($result.boot_id -shr 24) -bxor $result.generation -bxor ($result.generation -shr 8) -bxor
+            $result.trace -bxor $result.flags) -band 0xff
+    if($result.checksum -ne $check){throw 'P0E2 checksum mismatch'}
     if($result.format -ne 'P0E2' -or $result.boot_id -eq 0 -or $result.generation -ne 1 -or
        $result.trace -lt 0 -or $result.trace -gt 127){throw 'Malformed EP0 trace result'}
     if($Mode -eq 'Arm'){
@@ -70,6 +88,8 @@ try{
 }catch{$record.status='failed';$record.error=$_.Exception.Message}
 finally{
     if($process){$process.Dispose()}
+    if(Test-Path $phaseLog){$record.phases=@(Get-Content $phaseLog|ForEach-Object {$_|ConvertFrom-Json})}
+    $record.observed_request_count=if(@($record.phases|Where-Object phase -eq 'descriptor_entered').Count){1}else{0}
     $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $recordPath -Encoding utf8
 }
 Write-Output "EP0 trace read : $($record.status)"

@@ -1,9 +1,9 @@
 {
   "source": "windows-native/internal-storage/p0/Read-Ep0Trace.c",
-  "source_sha256": "BEC6568062F8D2DDEA40CCACD9E9B62303D9BB189A20921D42233F132D6DB0FB",
+  "source_sha256": "43AF90FD7B6F3253837F7AA6C8F34348D7704F3024526CE5C5835FC63569B738",
   "executable": "artifacts/p0-usb/tests/Read-Ep0Trace.exe",
-  "executable_sha256": "26CEBECDAC9D93272A6A81C37E716D2CB0B364CB31B29D67A53FBF57C3D5F823",
-  "operation": "one P0E2 USB string descriptor index 4 control-IN through the parent hub",
+  "executable_sha256": "9871F936F81A0E288171C01BF2E7AA01D90FFC2F1EA7E1124C81DD86535D1E3E",
+  "operation": "one explicitly selected USB string descriptor control-IN through the parent hub; next trial fixes product index 2",
   "com_opens": 0,
   "proxy_requests": 0,
   "ans_requests": 0,
