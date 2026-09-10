@@ -1378,3 +1378,32 @@ It fixes the executable/script/manifest/patch/payload paths, sizes and hashes,
 records the three exact commands, and explicitly leaves DFU, live identity,
 location and execution approval unsatisfied. No stage JSON or location binding
 was fabricated during this preparation.
+
+## Session w: stopped before Pongo transfer
+
+The user reported a fresh DFU entry and explicitly approved the three Session w
+commands. Checkm8 was executed once. Its saved record has status `passed`, the
+A1625 identity gate passed, the exact instance used `libusbK`, and the ordered
+location contained two entries. The existing handoff-stop behavior records
+`exit_code=-1`; the script's Checkm8 success predicate nevertheless passed.
+`Checkm8.json` SHA-256 is
+`8922E24951F426EA4FFD1F1701EFC8B585B150886E4AD7586D5D79A86A3D9A20`,
+and the saved `location.json` SHA-256 is
+`A868892B6366ACD75B644C2736EDEEB8D124A3FC5A74CB62C700575A572EB6AB`.
+
+The approved Pongo command was then invoked once and stopped in
+`Invoke-UsbBootStage.ps1` at the pre-launch `Expected one target` gate. Because
+that check precedes creation of the stage record and uploader launch, there is
+no `Pongo.json` and no Pongo transfer from this invocation. A read-only inventory
+immediately afterward found no 05AC:1227, 05AC:4141, or 1209:316D target.
+`Payload.json` and `passive-enumeration` are also absent. The third command was
+not run, and there was no retry, alternate route, COM/P_NOP, ANS initialization,
+or NAND access.
+
+The post-failure record is
+`artifacts/p0-usb/session-w-ep0-stale-in/PONGO-PREFLIGHT-FAILURE.md`, SHA-256
+`A503D4ADD02134572B001C435AACA60B1BAD5DCDDC92B230FE211572264C7357`.
+Session w is closed at this pre-Pongo boundary. A new attempt must use a new
+session directory, fresh DFU entry, live identity/location gates, and new
+approval; the successful Session w Checkm8 record must not be reused as proof
+for another connection.
