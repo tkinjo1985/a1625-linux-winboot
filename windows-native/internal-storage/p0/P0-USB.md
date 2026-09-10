@@ -40,7 +40,10 @@ with mocked registers: valid interfaces, all wrong request-type bytes, wrong
 value/length/interface, short OUT, GET, DTR edges, interrupted SETUP, simultaneous
 IN completion, immediate receive arming and status-to-SETUP progression. These
 tests do not establish actual DMA timing or bus behavior. USB reset hardware
-behavior is not covered by the mock tests. Native payload build passes.
+behavior is not covered by the mock tests. The actual software-state reset prefix
+is tested with a pending receive: both line codings reset, destinations are
+discarded and both DTR-ready flags clear. Endpoint-abort waits and reset MMIO
+effects remain outside this mock's coverage. Native payload build passes.
 
 ## Probe and remaining physical gates
 

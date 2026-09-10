@@ -67,6 +67,11 @@ body += function('static void usb_dwc2_ep0_handle_xfer_not_ready(dwc2_dev_t *dev
 ep = function('static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)')
 # The full EP0 part, excluding unrelated bulk endpoint mocks.
 body += ep[:ep.index('    if (daint & BIT(16 + 2))')] + '\n}\n'
+reset = function('static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)')
+# Execute the real software-state reset prefix; this does not model endpoint
+# abort waits or reset-register side effects in the remainder of this function.
+body += 'static const u8 cdc_default_line_coding[]={0x80,0x25,0,0,0,0,8};\n'
+body += reset[:reset.index('    // usb_debug_printf("handle_usbrst:')] + '\n}\n'
 main = r'''
 int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};d.endpoints[0].xfer_buffer=payload;
@@ -117,6 +122,17 @@ int main(void){
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE);
  daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
+ // Reset while a line-coding OUT is pending discards its destination and DTR.
+ d.ep0_read_buffer=d.pipe[1].cdc_line_coding;d.ep0_read_buffer_len=7;
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV_DONE;
+ d.pipe[0].ready=d.pipe[1].ready=true;
+ usb_dwc2_handle_usbrst(&d);
+ assert(!d.ep0_read_buffer && !d.ep0_read_buffer_len);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_IDLE);
+ for(unsigned p=0;p<2;p++){
+  assert(!d.pipe[p].ready);
+  assert(!memcmp(d.pipe[p].cdc_line_coding,cdc_default_line_coding,7));
+ }
  return 0;
 }
 '''
@@ -127,4 +143,4 @@ gcc = Path.home() / 'scoop/apps/msys2/current/ucrt64/bin/gcc.exe'
 os.environ['PATH'] = str(gcc.parent) + os.pathsep + os.environ['PATH']
 subprocess.run([str(gcc), '-std=c11', str(out/'cdc.c'), '-o', str(out/'cdc.exe')], check=True)
 subprocess.run([str(out/'cdc.exe')], check=True)
-print('Actual CDC handler/receive bodies: valid pipes, short OUT, lengths, interfaces, GET and DTR passed')
+print('CDC request/completion, EP0 interleaving and software reset tests passed; hardware timing unverified')
