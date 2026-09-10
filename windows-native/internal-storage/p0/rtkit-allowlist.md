@@ -39,8 +39,8 @@ unowned-size buffer replies, unsolicited/repeated ACKs and premature/repeated sl
 `test_rtkit_budget.py` checks the actual transport wrapper rejects a denied policy
 without invoking the mailbox sender. These are host tests, not real firmware traces.
 
-Remaining independent boundaries: `sep.c` also calls raw `akf_send` for its own
-controller, and generic proxy/transport operations can invoke other operations.
-The P0 session lock must exclude these paths and arbitrary calls/writes before
-claiming all controlled-host entry points are constrained. MMIO policy, current
-device identity and firmware/heap placement remain in `preflight-audit.md`.
+Independent boundaries: `sep.c` also calls raw `akf_send` for its own controller.
+The P0 session lock now rejects generic proxy calls, SEP operations and raw writes
+after sealing; see `session-lock.md`. Pre-experiment setup and full exception-path
+behavior remain separate audit work. MMIO policy, current device identity and
+firmware/heap placement remain in `preflight-audit.md`.

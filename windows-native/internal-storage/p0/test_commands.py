@@ -59,6 +59,7 @@ int main(void) {
   assert(!ans1_exec_command() && sends==1);
  }
  send_ok=wait_ok=true; ans1_initialized=true;
+ ans1_p0_read_buffer=(void *)(uintptr_t)0x1000;
  for(int failure=0;failure<4;failure++) {
   ans1_dead=false; sends=unwinds=0;
   u64 address=failure==0?0:failure==1?0x1001:failure==2?(1ULL<<44):0x1000;
@@ -75,6 +76,7 @@ int main(void) {
  assert(ans1_dead && sends==4 && unwinds==1);
  assert(!ans1_read_main_storage(1,(void *)(uintptr_t)0x1000) && sends==4);
  (void)ans1_stop_attempted; (void)ans1_cpu_clear;
+ (void)ans1_p0_session;
  (void)ans1_akf; (void)ans1_attempted; (void)ans1_powered; (void)ans1_ready; (void)ans1_identify_result;
  puts("P0 all 256 opcodes, request bounds and DEAD latch passed");
 }

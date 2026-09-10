@@ -38,7 +38,9 @@ def main():
               'firmware_persistent_side_effects': 'not_guaranteed_absent'}
     try:
         # Buffers remain allocated through this boot, including on transport loss.
-        buf = p.memalign(4096, 4096)
+        # Allocate and bind the sole export/read buffer, sealing generic proxy
+        # calls and raw writes for the rest of this boot before ANS is started.
+        buf = p.request(p.P_ANS1_RESERVED, 0)
         if not buf or buf & 4095 or buf >> 44:
             raise RuntimeError('invalid aligned read buffer')
         if not p.ans1_init():
