@@ -80,6 +80,20 @@ six pipes open. Neither observation uniquely identifies the COM-to-pair binding.
 The ETL contains other devices' rundown metadata too; keep it local. This was a
 configuration snapshot, not a capture of the earlier SetCommState failure.
 
+Later approved COM-open captures in sessions b and d show A1/21, wIndex 2,
+wLength 7 (GET_LINE_CODING). Session b records unsuccessful completions after
+approximately 30 seconds and an OS resend. Session d's host watchdog stops the
+open after 15 seconds. Neither session sent P_NOP or ANS requests. SET_LINE_CODING
+was not observed. These observations do not establish which device EP0 stage
+stalled. The control-read status CNAK correction (08399ae) did not produce a
+successful COM open in session d.
+
+The proxy startup wait calls iodev_handle_events before can_read; its USB wrapper
+does not gate handle_events on DTR. Thus a direct DTR-before-EP0 circular wait is
+not present in that call path. The mock test now explicitly exercises the observed
+interface-2 GET through IN completion, OUT status and rearmed SETUP. It passes;
+the test cannot prove the hardware delivered those interrupts or DMA data.
+
 `transport_probe.py` requires a reviewed identity bound to the new boot, then
 re-enumerates and compares it before open. Incomplete/ambiguous identity is a
 no-send failure. If Windows again exposes no explicit interface, descriptor /

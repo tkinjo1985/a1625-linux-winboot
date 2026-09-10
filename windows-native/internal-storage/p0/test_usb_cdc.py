@@ -146,6 +146,17 @@ int main(void){
  d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV;
  usb_dwc2_ep_hw_recv(&d,0,7,1);
  assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
+ // The observed A1/21 interface-2 request: IN data, OUT status, next SETUP.
+ s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
+ s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ assert(d.ep0_buffer==d.pipe[1].cdc_line_coding && d.ep0_buffer_len==7);
+ daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
+ daint=BIT(16);outint=1;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
  return 0;
 }
 '''
