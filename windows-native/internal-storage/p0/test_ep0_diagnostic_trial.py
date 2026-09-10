@@ -7,6 +7,7 @@ script = (HERE / 'Invoke-Ep0DiagnosticTrial.ps1').read_text()
 for required in (
     "throw 'Output directory exists; no automatic repeat'",
     "Approved payload hash mismatch",
+    "$powershell=(Get-Process -Id $PID).Path",
     "$record.arm_attempts=1",
     "$record.com_open_attempts=1",
     "$record.report_attempts=1",

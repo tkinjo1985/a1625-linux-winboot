@@ -750,3 +750,22 @@ Session t and its passed Checkm8 record may be continued only while the same
 YOLO identity and location remain present. The exact YOLO instance must first
 be changed to `libusbK`; then the Pongo command requires a new approval. If the
 device leaves YOLO DFU, Session t must not be resumed.
+
+### Session t diagnostic host-gate stop
+
+After Pongo and the hash-bound diagnostic payload passed, inventory saved one
+expected 1209:316D `usbser` candidate at USB(4)/HS04. The approved diagnostic
+wrapper started ETW, then its Arm child failed before creating the arm output
+directory because it launched a legacy `powershell.exe` environment in which
+`Get-FileHash` was unavailable. The native reader was never started, so the
+device received no index-4 arm request. The persisted counters are actual arm
+requests 0, COM opens 0, reports 0, P_NOP/ANS/NAND 0. ETL and XML were retained
+with SHA-256 `3CE41D9CB87BDA04C0992793906D904A597C56943E749172724686851B63A690`
+and `1B183FD9CBB91BF31854B75D80A505C1B146B54EF1CFCCAED51AE5ABA1CA6D94`.
+
+No automatic retry occurred. The host-only correction makes the child use the
+same executable as the current PowerShell process instead of resolving
+`powershell.exe`. The corrected wrapper SHA-256 is
+`C79D5F751E46EF91918E5B1CC329DEB9B3A3FDDF325D004861A1735572EDE417`.
+The existing diagnostic output directory is not reusable;
+another diagnostic attempt requires a new output directory and new approval.

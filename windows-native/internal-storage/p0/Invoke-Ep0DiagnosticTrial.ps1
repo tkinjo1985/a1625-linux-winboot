@@ -15,7 +15,8 @@ $armScript=(Resolve-Path (Join-Path $PSScriptRoot 'Invoke-Ep0TraceRead.ps1')).Pa
 $probe=(Resolve-Path (Join-Path $PSScriptRoot 'trace_open.py')).Path
 $python='C:\Users\tkinj\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
 $deps=(Resolve-Path (Join-Path $root 'artifacts/ans-p0-python-deps')).Path
-$powershell=(Get-Command powershell.exe).Source
+$powershell=(Get-Process -Id $PID).Path
+if(-not $powershell -or -not (Test-Path -LiteralPath $powershell)){throw 'Current PowerShell executable unavailable'}
 New-Item -ItemType Directory -Path $out|Out-Null
 $record=[ordered]@{mode='P0-USB armed one-shot EP0 diagnostic';status='starting';
     arm_attempts=0;com_open_attempts=0;report_attempts=0;proxy_requests=0;
