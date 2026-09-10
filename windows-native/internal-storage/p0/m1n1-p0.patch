@@ -399,10 +399,95 @@ index 17e992c..ff5b0e2 100644
              reply->retval = main_storage_init();
              break;
 diff --git a/src/rtkit.c b/src/rtkit.c
-index 1e15405..cd5ff6b 100644
+index 1e15405..36f1c72 100644
 --- a/src/rtkit.c
 +++ b/src/rtkit.c
-@@ -356,6 +356,12 @@ out_free_rtk:
+@@ -127,6 +127,9 @@ struct rtkit_dev {
+     u32 syslog_cnt, syslog_size;
+ 
+     bool crashed;
++#ifdef ANS1_P0
++    unsigned int p0_tx_count, p0_rx_count;
++#endif
+ };
+ 
+ struct syslog_log {
+@@ -246,17 +249,37 @@ static bool rtkit_akf_can_recv(struct rtkit_dev *rtk)
+ static bool rtkit_akf_send(struct rtkit_dev *rtk, const struct rtkit_message *rtk_msg)
+ {
+     u64 akf_msg = 0;
++#ifdef ANS1_P0
++    if (rtk->crashed || rtk->p0_tx_count >= 128) {
++        rtk->crashed = true;
++        return false;
++    }
++    ++rtk->p0_tx_count;
++    printf("ANS1-P0: RTKit TX n=%u ep=0x%x value=0x%lx\n",
++           rtk->p0_tx_count, rtk_msg->ep, rtk_msg->msg);
++#endif
+ 
+     akf_msg |= FIELD_PREP(RTKIT_AKF_MSG_EP, rtk_msg->ep);
+     akf_msg |= FIELD_PREP(RTKIT_AKF_MSG_MSG, rtk_msg->msg);
+ 
+-    return akf_send((akf_dev_t *)rtk->mbox, akf_msg);
++    bool sent = akf_send((akf_dev_t *)rtk->mbox, akf_msg);
++#ifdef ANS1_P0
++    if (!sent)
++        rtk->crashed = true;
++#endif
++    return sent;
+ }
+ 
+ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
+ {
+     u64 akf_msg;
+     bool recv;
++#ifdef ANS1_P0
++    if (rtk->crashed || rtk->p0_rx_count >= 512) {
++        rtk->crashed = true;
++        return false;
++    }
++#endif
+ 
+     recv = akf_recv((akf_dev_t *)rtk->mbox, &akf_msg);
+     if (!recv)
+@@ -264,6 +287,11 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
+ 
+     rtk_msg->msg = FIELD_GET(RTKIT_AKF_MSG_MSG, akf_msg);
+     rtk_msg->ep = FIELD_GET(RTKIT_AKF_MSG_EP, akf_msg);
++#ifdef ANS1_P0
++    ++rtk->p0_rx_count;
++    printf("ANS1-P0: RTKit RX n=%u ep=0x%x value=0x%lx\n",
++           rtk->p0_rx_count, rtk_msg->ep, rtk_msg->msg);
++#endif
+ 
+     return true;
+ }
+@@ -271,6 +299,15 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
+ static bool rtkit_akf_recv_timeout(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg,
+                                    u32 delay_usec)
+ {
++#ifdef ANS1_P0
++    /* The HELLO/EPMAP path must share the same counter as ordinary RX. */
++    u64 deadline = timeout_calculate(delay_usec);
++    while (!timeout_expired(deadline) && !rtk->crashed) {
++        if (rtkit_akf_recv(rtk, rtk_msg))
++            return true;
++    }
++    return false;
++#else
+     u64 akf_msg;
+     bool recv;
+ 
+@@ -282,6 +319,7 @@ static bool rtkit_akf_recv_timeout(struct rtkit_dev *rtk, struct rtkit_message *
+     rtk_msg->ep = FIELD_GET(RTKIT_AKF_MSG_EP, akf_msg);
+ 
+     return true;
++#endif
+ }
+ 
+ static const struct rtkit_iop_ops __rtkit_akf_iop_ops = {
+@@ -356,6 +394,12 @@ out_free_rtk:
  
  void rtkit_free(rtkit_dev_t *rtk)
  {
@@ -415,7 +500,7 @@ index 1e15405..cd5ff6b 100644
      rtkit_free_buffer(rtk, &rtk->syslog_bfr);
      rtkit_free_buffer(rtk, &rtk->crashlog_bfr);
      rtkit_free_buffer(rtk, &rtk->ioreport_bfr);
-@@ -402,6 +408,10 @@ bool rtkit_map(rtkit_dev_t *rtk, void *phys, size_t sz, u64 *dva)
+@@ -402,6 +446,10 @@ bool rtkit_map(rtkit_dev_t *rtk, void *phys, size_t sz, u64 *dva)
  
  bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
  {
@@ -426,7 +511,7 @@ index 1e15405..cd5ff6b 100644
      if (rtk->sart) {
          if (!sart_remove_allowed_region(rtk->sart, (void *)dva, sz))
              rtkit_printf("sart_remove_allowed_region failed (0x%lx, 0x%lx)\n", dva, sz);
-@@ -418,6 +428,7 @@ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
+@@ -418,6 +466,7 @@ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
  
  bool rtkit_alloc_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr, size_t sz)
  {
@@ -434,7 +519,7 @@ index 1e15405..cd5ff6b 100644
      bfr->bfr = memalign(SZ_16K, sz);
      if (!bfr->bfr) {
          rtkit_printf("unable to allocate %zu buffer\n", sz);
-@@ -440,6 +451,10 @@ error:
+@@ -440,6 +489,10 @@ error:
  
  bool rtkit_free_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr)
  {
@@ -445,7 +530,7 @@ index 1e15405..cd5ff6b 100644
      if (!bfr->bfr || !is_heap(bfr->bfr))
          return true;
  
-@@ -458,6 +473,14 @@ static bool rtkit_handle_buffer_request(rtkit_dev_t *rtk, struct rtkit_message *
+@@ -458,6 +511,14 @@ static bool rtkit_handle_buffer_request(rtkit_dev_t *rtk, struct rtkit_message *
      size_t sz = n_4kpages << 12;
      u64 addr = FIELD_GET(MSG_BUFFER_REQUEST_IOVA, msg->msg);
  
@@ -460,7 +545,7 @@ index 1e15405..cd5ff6b 100644
      if (rtk->sram) {
          if (!addr) {
              rtkit_printf("SRAM buffers needs to be provided by the IOP\n");
-@@ -512,6 +535,13 @@ static void rtkit_crashed(rtkit_dev_t *rtk)
+@@ -512,6 +573,13 @@ static void rtkit_crashed(rtkit_dev_t *rtk)
      struct crashlog_hdr *hdr = rtk->crashlog_bfr.bfr;
      rtk->crashed = true;
  
@@ -474,7 +559,7 @@ index 1e15405..cd5ff6b 100644
      rtkit_printf("IOP crashed!\n");
  
      if (hdr->type != 'CLHE') {
-@@ -550,7 +580,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+@@ -550,7 +618,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
      if (rtk->crashed)
          return -1;
  
@@ -484,7 +569,31 @@ index 1e15405..cd5ff6b 100644
          /* if this is an app message we can just forward it to the caller */
          if (msg->ep >= rtk->app_ep_start)
              return 1;
-@@ -661,6 +692,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
+@@ -589,8 +658,10 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+                             printf("\n");
+                     }
+ #endif
+-                        if (!rtkit_send(rtk, msg))
++                        if (!rtkit_send(rtk, msg)) {
+                             rtkit_printf("failed to ack syslog\n");
++                            return -1;
++                        }
+                         break;
+                     default:
+                         rtkit_printf("unknown syslog message %x\n", msgtype);
+@@ -618,8 +689,10 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+                     /* unknown but must be ACKed */
+                     case 0x8:
+                     case 0xc:
+-                        if (!rtkit_send(rtk, msg))
++                        if (!rtkit_send(rtk, msg)) {
+                             rtkit_printf("unable to ACK unknown ioreport message\n");
++                            return -1;
++                        }
+                         break;
+                     default:
+                         rtkit_printf("unknown ioreport message %x\n", msgtype);
+@@ -661,6 +734,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
  bool rtkit_boot(rtkit_dev_t *rtk)
  {
      struct rtkit_message msg;
@@ -492,7 +601,7 @@ index 1e15405..cd5ff6b 100644
  
      /* boot the IOP if it isn't already */
      rtk->iop_ops->cpu_start(rtk);
-@@ -728,6 +760,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -728,6 +802,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
      bool got_epmap = false;
  
      while (!got_epmap) {
@@ -501,7 +610,7 @@ index 1e15405..cd5ff6b 100644
          if (!rtk->iop_ops->recv_timeout(rtk, &msg, USEC_PER_SEC)) {
              rtkit_printf("couldn't receive message while waiting for endpoint map\n");
              return false;
-@@ -815,6 +849,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -815,6 +891,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
          return false;
  
      while (rtk->iop_power != RTKIT_POWER_ON) {
@@ -510,7 +619,7 @@ index 1e15405..cd5ff6b 100644
          struct rtkit_message rtk_msg;
          bool handled = false;
          int ret = rtkit_recv(rtk, &rtk_msg);
-@@ -847,6 +883,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -847,6 +925,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
  static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state target)
  {
      struct rtkit_message msg;
@@ -518,7 +627,7 @@ index 1e15405..cd5ff6b 100644
  
      if (rtk->crashed)
          return false;
-@@ -861,6 +898,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -861,6 +940,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->ap_power != RTKIT_POWER_QUIESCED) {
@@ -527,7 +636,7 @@ index 1e15405..cd5ff6b 100644
          /* Workaround for iOS 10 RTKit acknowledging AP power state 0x0 during sleep */
          if (rtk->protocol_ver < 11 && rtk->ap_power == RTKIT_POWER_OFF)
              break;
-@@ -891,6 +930,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -891,6 +972,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->iop_power != target) {
@@ -536,7 +645,7 @@ index 1e15405..cd5ff6b 100644
          struct rtkit_message rtk_msg;
          int ret = rtkit_recv(rtk, &rtk_msg);
          bool handled = false;
-@@ -920,12 +961,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
+@@ -920,12 +1003,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
  
  bool rtkit_sleep(rtkit_dev_t *rtk)
  {
