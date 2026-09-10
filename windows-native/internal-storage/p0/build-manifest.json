@@ -2,9 +2,9 @@
   "source_url": "https://github.com/HoolockLinux/m1n1.git",
   "source_revision": "d5a10ac52a6468484854419a6c5130f1d62073eb",
   "ans1_feature_origin": "8a8bc21922b21a909330d7dbec53e8a763e9fa34",
-  "patch_sha256": "2490d397f05e080afd9156e1f70409050ee51a73810744074ac8c8c8521a82eb",
-  "m1n1_bin_path": "artifacts/p0-usb/payloads/ep0-stale-in-39543ddb/m1n1.bin",
-  "m1n1_bin_sha256": "39543ddb1a2d88c7950af67506821846d0d1c08bcdf5e606d9b040c6d703740b",
+  "patch_sha256": "d4b2c6b60c5929ad8174f68326b8f85cd4c3972da3cef19b5f9290274247901f",
+  "m1n1_bin_path": "third_party/HoolockLinux-m1n1-p0/build/m1n1.bin",
+  "m1n1_bin_sha256": "32daff697b7f66be5335a1b020a7310993074607e08116d440da9f47ca6d96a9",
   "cargo_lock_sha256": "58dbc0049ee8065dd7992bbcdd45ec5e62608ec9bec996d2411802ad9ed408b1",
   "linker_wrapper_sha256": "d97bf90b885780a75b8900938dce182ae8a4cbfea044086cbc57869caa64ee93",
   "build_flags": [

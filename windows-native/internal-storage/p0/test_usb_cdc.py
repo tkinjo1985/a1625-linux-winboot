@@ -71,6 +71,7 @@ typedef struct {
 static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
 static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
 static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
+static bool in_ep_enabled;
 static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
 static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){statuses++;if(e==USB_LEP_CTRL_OUT)usb_dwc2_ep_hw_recv(d,e,64,1);}
@@ -80,10 +81,14 @@ static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_b
 static void dma_rmb(void){}
 static bool published;
 static void dma_wmb(void){published=true;}
-static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;return remaining;}
-static void write32(unsigned a,unsigned v){if(a==60){assert(published);dma_addr=v;}if(a==70)dma_size=v;}
+static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;if(a==80)return in_ep_enabled?DWC2_DXEPCTLi_EnableEP:0;return remaining;}
+static void write32(unsigned a,unsigned v){
+ if(a==20)outint&=~v; // endpoint interrupt registers are modeled as W1C latches
+ if(a==30)inint&=~v;
+ if(a==60){assert(published);dma_addr=v;}if(a==70)dma_size=v;
+}
 static unsigned control_bits;
-static void set32(unsigned a,unsigned v){if(a==80)in_control_bits=v;else control_bits=v;}
+static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);}else control_bits=v;}
 static const u8 phyEndpoints[]={0,0x80};
 '''
 body = function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
@@ -107,6 +112,21 @@ int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};u8 in_payload[64]={0};
  d.endpoints[0].xfer_buffer=payload;d.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet s={.raw={0x21,0x20,0,0,7}};
+#ifdef COMPLETION_CASE_B_ONLY
+ // Model B: SETUP supersedes the old control transfer and no old IN
+ // completion remains separately observable. The first later completion is
+ // therefore the new GET's completion and must advance its data phase.
+ s.raw.bmRequestType=0xa1;s.raw.bRequest=0x21;s.raw.wValue=0;
+ s.raw.wIndex=2;s.raw.wLength=7;d.endpoints[0].xfer_buffer=&s;
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;inint=0;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
+ daint=BIT(0);inint=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
+ return 0;
+#endif
  // Exact driver-init sequence with a known synthetic line-coding value.
  dwc2_dev_t seqd={0};seqd.endpoints[0].xfer_buffer=payload;seqd.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet seq={.raw={0xa1,0x21,0,2,7}};
@@ -167,7 +187,7 @@ int main(void){
  d.endpoints[0].xfer_buffer=payload;remaining=0;daint=BIT(16);outint=1;
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE);
- daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
+ daint=BIT(0);inint=1;in_ep_enabled=false;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE);
  // The next SETUP can be observed after DAINT was sampled but before the
  // preceding IN-status completion is serviced. That old completion must not
@@ -182,6 +202,7 @@ int main(void){
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE);
  // A following completion belongs to the newly armed GET and may advance it.
+ inint=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false; // distinct completed new transfer
  usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
  // Reset while a line-coding OUT is pending discards its destination and DTR.
@@ -214,7 +235,7 @@ int main(void){
  assert(published && !memcmp(in_payload,d.pipe[1].cdc_line_coding,7));
  assert(dma_addr && dma_size==(1U<<19|7));
  assert(in_control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
- daint=BIT(0);inint=1;usb_dwc2_handle_interrupts_ep(&d);
+ daint=BIT(0);inint=1;in_ep_enabled=false;usb_dwc2_handle_interrupts_ep(&d);
  assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE);
  assert(d.p0_ep0_trace==(P0_EP0_SETUP_CONSUMED|P0_EP0_GET_HANDLER|P0_EP0_IN_ARMED|P0_EP0_IN_COMPLETE|P0_EP0_STATUS_ARMED));
  daint=BIT(16);outint=1;usb_dwc2_handle_interrupts_ep(&d);
@@ -229,9 +250,113 @@ int main(void){
 main=main.replace(' return 0;', ' published=false;usb_dwc2_ep_hw_send(&d,1,7,1);assert(published && d.endpoints[1].in_flight==7);\n return 0;')
 out = ROOT / 'artifacts/p0-usb/tests'
 out.mkdir(parents=True, exist_ok=True)
-(out / 'cdc.c').write_text(prefix + body + main)
+candidate_c = prefix + body + main
+
+# Reconstruct the physically tested Session-y handler from the candidate. The
+# exact replacements ensure that source drift cannot silently alter the model.
+session_y_c = candidate_c
+candidate_completion = '''        /* XferCompl has no software-visible transfer identity.  If a new
+         * SETUP has already armed EP0 IN, a late completion from the
+         * superseded status transfer can still share this bit.  The core
+         * clears EPENA when the currently programmed IN transfer completes;
+         * only advance that current transfer after observing that boundary. */
+        if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
+            ep0_in_complete &&
+            !(read32(dev->regs + DWC2_DIEPCTL(0)) & DWC2_DXEPCTLi_EnableEP)) {
+'''
+session_y_completion = '''        if (dev->ep0_ignore_next_in_completion && ep0_in_complete) {
+            dev->ep0_ignore_next_in_completion = false;
+        } else if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
+                   ep0_in_complete) { // XferCompl
+'''
+assert session_y_c.count(candidate_completion) == 1
+session_y_c = session_y_c.replace(candidate_completion, session_y_completion)
+setup_marker = '''        if (setup_packet_recvd || setup_phase_done) {
+#ifdef ANS1_P0
+'''.replace('+', '')
+session_y_setup = '''        if (setup_packet_recvd || setup_phase_done) {
+            /* A host may issue the next SETUP before software observes the
+             * preceding IN-status completion. Once this SETUP supersedes the
+             * old control transfer, that late completion must not advance the
+             * newly armed IN data phase. If it was in this snapshot, it was
+             * already acknowledged above and needs no deferred discard. */
+            if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE &&
+                !ep0_in_complete)
+                dev->ep0_ignore_next_in_completion = true;
+#ifdef ANS1_P0
+'''
+assert session_y_c.count(setup_marker) == 1
+session_y_c = session_y_c.replace(setup_marker, session_y_setup)
+reset_marker = 'static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)\n{\n'
+assert session_y_c.count(reset_marker) == 1
+session_y_c = session_y_c.replace(reset_marker, reset_marker +
+                                  '    dev->ep0_ignore_next_in_completion = false;\n')
+
+# Reconstruct the exact completion-handling shape immediately before the
+# Session-y one-bit discard change. These replacements are intentionally exact:
+# drift must fail the test instead of silently producing a different model.
+pre_fix_c = session_y_c
+replacements = [
+    ('    bool ep0_in_complete = false;\n', ''),
+    ('''        ep0_in_complete = diepint & DWC2_DOEPINT_XFER_COMPL;
+        if (dev->ep0_ignore_next_in_completion && ep0_in_complete) {
+            dev->ep0_ignore_next_in_completion = false;
+        } else if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
+                   ep0_in_complete) { // XferCompl
+''', '''        if (!new_setup && dev->ep0_state != USB_DWC2_EP0_STATE_SETUP_PENDING &&
+            (diepint & DWC2_DOEPINT_XFER_COMPL)) { // XferCompl
+'''),
+    ('''            /* A host may issue the next SETUP before software observes the
+             * preceding IN-status completion. Once this SETUP supersedes the
+             * old control transfer, that late completion must not advance the
+             * newly armed IN data phase. If it was in this snapshot, it was
+             * already acknowledged above and needs no deferred discard. */
+            if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE &&
+                !ep0_in_complete)
+                dev->ep0_ignore_next_in_completion = true;
+''', ''),
+    ('    dev->ep0_ignore_next_in_completion = false;\n', ''),
+]
+for old, new in replacements:
+    assert pre_fix_c.count(old) == 1, f'completion baseline drift: {old[:48]!r}'
+    pre_fix_c = pre_fix_c.replace(old, new)
+
 gcc = Path.home() / 'scoop/apps/msys2/current/ucrt64/bin/gcc.exe'
 os.environ['PATH'] = str(gcc.parent) + os.pathsep + os.environ['PATH']
-subprocess.run([str(gcc), '-std=c11', str(out/'cdc.c'), '-o', str(out/'cdc.exe')], check=True)
-subprocess.run([str(out/'cdc.exe')], check=True)
-print('CDC request/completion, P0 pipe-1 binding, EP0 interleaving and software reset tests passed; hardware timing unverified')
+
+def compile_case(name, text, case_b=False):
+    c_path = out / f'{name}.c'
+    exe_path = out / f'{name}.exe'
+    c_path.write_text(text)
+    args = [str(gcc), '-std=c11']
+    if case_b:
+        args.append('-DCOMPLETION_CASE_B_ONLY=1')
+    subprocess.run(args + [str(c_path), '-o', str(exe_path)], check=True)
+    return subprocess.run([str(exe_path)], capture_output=True, text=True)
+
+def require_pass(result, label):
+    assert result.returncode == 0, f'{label}: unexpected failure: {result.stderr}'
+
+def require_known_failure(result, label, assertion):
+    assert result.returncode != 0, f'{label}: unexpectedly passed'
+    assert assertion in result.stderr, f'{label}: wrong failure: {result.stderr}'
+
+pre_a = compile_case('cdc-pre-fix-a', pre_fix_c)
+require_known_failure(pre_a, 'pre-fix case A',
+                      'd.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE')
+pre_b = compile_case('cdc-pre-fix-b', pre_fix_c, case_b=True)
+require_pass(pre_b, 'pre-fix case B')
+session_y_a = compile_case('cdc-session-y-a', session_y_c)
+require_pass(session_y_a, 'Session-y case A')
+session_y_b = compile_case('cdc-session-y-b', session_y_c, case_b=True)
+require_known_failure(session_y_b, 'Session-y case B',
+                      'd.ep0_state==USB_DWC2_EP0_STATE_DATA_RECV_STATUS_DONE')
+candidate_a = compile_case('cdc-candidate-a', candidate_c)
+require_pass(candidate_a, 'candidate case A')
+candidate_b = compile_case('cdc-candidate-b', candidate_c, case_b=True)
+require_pass(candidate_b, 'candidate case B')
+
+print('CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS')
+print('completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; '
+      'Session-y A=PASS, B=XFAIL(expected assertion); candidate A=PASS, B=PASS')
+print('candidate premise: current IN completion is accepted only after EPENA clears')

@@ -1528,3 +1528,283 @@ for IN transfer-complete relative to back-to-back SETUP, including whether an
 old completion remains observable after SETUP and how W1C acknowledgement is
 ordered. Linux's descriptor-DMA control chains are not a substitute for that
 mode-specific premise.
+
+## Post-Session y offline buffer-DMA completion review
+
+This section records offline source, saved-log, primary-source and host-test
+work only. No USB request, COM open, boot, reset, disconnect/re-enumeration or
+driver operation occurred. Session y and its payload remain the latest physical
+result and hardware-tested artifact; they are not relabeled as a recommended
+fix.
+
+### A/B completion regression restored
+
+The previously isolated counterexample is now part of the normal
+`test_usb_cdc.py` run alongside the stale-completion regression. The test
+extracts the real EP0 implementation, reconstructs the pre-Session-y handler by
+exact checked replacements, and compiles both versions under both premises.
+An expected failure must fail at its named state assertion; another failure or
+an unexpected pass fails the test runner.
+
+| Case | Real-code input and mock hardware premise | Required invariant | pre-fix | Session-y | candidate |
+| --- | --- | --- | --- | --- | --- |
+| A | EP0 starts in `DATA_SEND_STATUS_DONE`; SETUP for `A1/21/0/2/7` is consumed with no IN bit in that snapshot; an old IN `XferCompl` is asserted separately, followed by a distinct new-GET IN `XferCompl` | the old assertion must leave the new GET in `DATA_SEND_DONE`; the distinct new assertion must advance to `DATA_RECV_STATUS_DONE` | XFAIL at preservation assertion | PASS | none |
+| B | same initial state and SETUP, but no old completion is asserted; the first later IN `XferCompl` is the new GET's completion | the first completion must advance to `DATA_RECV_STATUS_DONE` | PASS | XFAIL at advancement assertion | none |
+
+The MMIO mock now clears `DIEPINT/DOEPINT` bits on W1C writes. Case A explicitly
+reasserts the bit for its second event, so it no longer obtains two semantic
+events by repeatedly reading one uncleared scalar. It still deliberately
+supplies event order rather than deriving Apple/T7000 hardware order. Neither
+Case A nor B is claimed to be the Session-y order.
+
+The same run retains normal interface-2 GET/SET behavior, 82-byte product
+transfer mechanics, short OUT and invalid request rejection, DTR behavior,
+reset cleanup, DMA publication ordering and diagnostic checkpoint sequences.
+The current result is:
+
+```text
+CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS
+completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; Session-y A=PASS, B=XFAIL(expected assertion); candidate=NONE
+hardware premise for A versus B remains unverified
+```
+
+### Active transfer mode and evidence limits
+
+| Question | Evidence | Conclusion |
+| --- | --- | --- |
+| hardware capability | `GHWCFG2` is read only for PHY type; `GHWCFG4` and descriptor-DMA capability are not saved by the executed sessions | unobserved; no capability is inferred |
+| source-selected mode | `usb_dwc2_init` writes `GAHBCFG.DMA_EN`, writes no descriptor-DMA enable in `DCFG`, and transfers program direct `DIEPDMA/DOEPDMA` plus `DIEPTSIZ/DOEPTSIZ` | internal/buffer DMA, not PIO and not descriptor DMA |
+| physical readback | search of the saved P0 evidence found no `GAHBCFG`, `DCFG`, `GHWCFG` or relevant `GSNPSID` value | unobserved; the source-selected mode is not mislabeled as saved readback |
+
+Synopsys' public DWC_otg page identifies Programming Guide and Databook v5.00b,
+but the document links redirect to authenticated SolvNet, so their normative
+back-to-back SETUP, W1C-race and completion-retention text could not be reviewed.
+The primary implementation comparison is upstream Linux
+`drivers/usb/dwc2/gadget.c` at revision
+`3dab139d4795f688e4f243e40c7474df00d329d9`. In buffer-DMA mode it reads a
+masked endpoint-interrupt snapshot, W1C-clears that snapshot before semantic
+processing, dispatches OUT endpoints before IN endpoints, and associates an IN
+completion with its current queued request. Descriptor-DMA branches are kept
+separate and were not transferred to this build. This is an implementation
+precedent, not a specification of the older Apple/T7000 integration, and it
+does not establish whether an old IN completion can assert after the new SETUP
+has been accepted and a new transfer armed.
+
+References and reproducibility: [Synopsys DWC_otg product page](https://www.synopsys.com/dw/ipdir.php?ds=dwc_usb_2_0_hs_otg),
+[upstream Linux gadget.c at the reviewed revision](https://github.com/torvalds/linux/blob/3dab139d4795f688e4f243e40c7474df00d329d9/drivers/usb/dwc2/gadget.c).
+The downloaded upstream file was 151541 bytes with SHA-256
+`BAF17CB89E78C8A63F0A9688AF7697875018F162923118F72F1092DF703F6D8D`.
+
+### Design decision: outcome B
+
+The implementation-visible sequence is the same through the ambiguous point:
+OUT SETUP status is observed; an optional IN bit from the same snapshot is
+acknowledged; the SETUP handler replaces software state and arms the GET IN;
+later `DIEPINT.XferCompl=1` is read and acknowledged. That last one-bit value
+has no transfer identifier. A software flag, counter or generation number
+cannot associate it with hardware without an independently established
+boundary. Direction 1 therefore has no reliable identity input. Direction 2
+requires a mode-specific, documented way to quiesce/acknowledge the old EP0 IN
+without losing the new SETUP or overwriting its DMA buffer; that controller
+procedure is not established by the accessible evidence. Merely reading zero,
+adding a delay, or disabling an endpoint speculatively would not establish the
+boundary.
+
+The single unresolved proposition is: **after a new SETUP supersedes the old
+EP0 control transfer in this buffer-DMA configuration, can the old IN
+`XferCompl` assert or remain latched after software accepts that SETUP and arms
+the new IN?** If true, the handler needs a documented quiesce/acknowledgement
+boundary or a reliable hardware identity before arming the GET. If false, the
+Session-y discard consumes the new GET's valid completion and must be removed.
+No device-source change, candidate patch, build or payload was made because the
+available evidence does not choose safely between those actions.
+
+### Relationship to the Session-y STALL
+
+Under Case A, the pre-fix handler uses the old completion to advance the new GET
+from `DATA_SEND_DONE` to `DATA_RECV_STATUS_DONE` and arms OUT status. That is a
+wrong state transition, not by itself proof that software issued a STALL. A
+later event/state mismatch can reach an existing STALL branch, but the saved
+ETW cannot establish that chain.
+
+Under Case B, Session-y discards the new GET's only modeled IN completion and
+leaves state at `DATA_SEND_DONE`. If an OUT completion then arrives, the EP0 OUT
+handler accepts only `DATA_RECV_STATUS_DONE` or `DATA_RECV_DONE`; otherwise its
+`BAD STATUS with COMPL` branch calls
+`usb_dwc2_ep_set_stall(..., USB_LEP_CTRL_IN, 1)`, sets `IDLE`, and rearms setup.
+This supplies a possible software path to the host-observed STALL and subsequent
+standard-request trouble. If no such OUT completion arrives, the model instead
+waits with a lost completion. Neither order is captured device-side in Session
+y. Thus the state-machine problems are real, but causation of Session-y's STALL
+and later five-second cancellations remains unconfirmed; ETW proves a controller
+STALL result, not execution of the named software call.
+
+### Saved artifacts, tests, and minimum next evidence
+
+The offline result is saved at
+`artifacts/p0-usb/post-session-y-offline/RESULT.md`. Relevant hashes at this
+review point are:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Session-y hardware-tested payload | `39543DDB1A2D88C7950AF67506821846D0D1C08BCDF5E606D9B040C6D703740B` |
+| current device source | `05833EB306621443D14C87C022F94EFA34593A824397B4BC1F4882D3D4D0B3FD` |
+| current device patch | `2490D397F05E080AFD9156E1F70409050EE51A73810744074AC8C8C8521A82EB` |
+| continuous A/B test source | `BC93B52852E82C278DCE46A8794CAE42B9D52FBC032D98B5C9CB39C622E10383` |
+
+All 20 P0 host test files passed. In the initial aggregate run, 19 passed and
+`test_startup_object.py` was blocked from executing the saved read-only
+`llvm-objdump` by the sandbox; that one test was rerun once with the executable
+permitted and passed. Within the passing CDC test, pre-fix A and Session-y B
+remain the named, assertion-specific XFAILs shown above. They are not counted
+as normal case passes. No m1n1 device build was run because there is no device
+source change, candidate patch or candidate payload.
+
+The minimum decisive observation is a device-internal, time-ordered record of
+`DAINT`, EP0 `DIEPINT/DOEPINT`, EP0 software state, and the acknowledgement and
+`DIEPDMA/DIEPTSIZ/DIEPCTL` arm writes from SET_LINE_CODING status completion
+through the second GET. A result showing an old completion after the new arm
+supports the need for a proven Direction-2 boundary; a result showing that the
+only post-arm assertion belongs to the new transfer rejects the Session-y
+discard premise. A missing record remains UNKNOWN.
+
+Saved ETW cannot read MMIO or CPU handler order. The post-failure index-4 read,
+pre-COM index-4 arm, and parent-hub product read have already failed and are not
+proposed again. UART, another host and a USB analyzer are not treated as
+available; external packets alone would not give CPU interrupt order. The
+required capability is a confirmed trace sink that captures those on-target
+values and stays recoverable without the failed EP0 path (for example, an
+independently established debug/MMIO trace facility). No such facility is
+currently confirmed, so no diagnostic implementation or device trial is
+proposed. The next step is review of that required capability or access to the
+applicable authenticated core documentation. Any physical operation would need
+a concrete new plan and fresh approval. COM/P_NOP, ANS and NAND remain outside
+this work.
+
+## Post-Session y continuation: EPENA completion boundary candidate
+
+Further primary-source review found a controller state that can distinguish
+the two completion premises without assigning a software generation to the
+one-bit interrupt. ST RM0386 Rev 6 section 35.15.52 defines the DWC2-compatible
+IN endpoint `XFRC` as completion on both AHB and USB. Section 35.15.53 states
+that the core clears `DIEPCTL0.EPENA` when the programmed endpoint-0 transfer
+completes and that the application may read the core-modified `DIEPTSIZ0` only
+after that clear. Consequently the candidate does not read transfer size while
+EPENA is set. It uses EPENA itself as the current-transfer completion boundary.
+
+This evidence refines, rather than erases, the preceding outcome-B record. The
+previously missing premise now has an applicable DWC2 register definition, but
+the Apple/T7000 physical behavior remains untested.
+
+### Minimal implementation
+
+The Session-y `ep0_ignore_next_in_completion` field and next-event discard are
+removed. The handler keeps its OUT-first snapshot rule and W1C-acknowledges the
+observed `DIEPINT0` snapshot. An IN `XferCompl` advances EP0 only when there is
+no simultaneous new SETUP, state is not `SETUP_PENDING`, and
+`DIEPCTL0.EPENA` is clear.
+
+For Case A, the new GET has already been armed when the separately delayed old
+status completion is serviced, so EPENA remains set and that completion cannot
+advance the GET. After the GET really completes, the core-cleared EPENA permits
+its completion to advance to OUT status. For Case B, there is no old event and
+the first completion is observed after the core clears EPENA, so it is not
+discarded. If old and new completions coalesce before W1C, the new transfer is
+already complete and EPENA is clear; one semantic advancement is sufficient.
+If the new completion asserts after the old snapshot was W1C-cleared, the new
+bit remains a later assertion and is processed after EPENA clears.
+
+This is Direction 1 using hardware current-transfer state, not an additional
+condition on the old discard flag. No delay, endpoint disable, STALL ignore,
+new diagnostic channel or change to SETUP DMA ownership was added.
+
+### Continuous regression and build
+
+The actual-source matrix now produces:
+
+```text
+CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS
+completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; Session-y A=PASS, B=XFAIL(expected assertion); candidate A=PASS, B=PASS
+candidate premise: current IN completion is accepted only after EPENA clears
+```
+
+The mock now models endpoint interrupt registers as W1C latches and EPENA as
+set while the current IN remains active and clear at its completion. The two
+expected historical failures must still occur at their named assertions. The
+candidate passes A and B while retaining the normal GET/SET, 82-byte product,
+short OUT, invalid request, DTR, reset and DMA-publication cases.
+
+All 20 P0 host test files passed. The fixed native build with
+`USE_CLANG=1 ARCH=aarch64-none-elf CHAINLOADING=1
+EXTRA_CFLAGS=-DANS1_P0` succeeded. No physical operation was performed as part
+of this preparation.
+
+| Candidate artifact | SHA-256 |
+| --- | --- |
+| `m1n1.bin` | `32DAFF697B7F66BE5335A1B020A7310993074607E08116D440DA9F47CA6D96A9` |
+| source `usb_dwc2.c` | `8C53F090FD861CE4D3BE53008D9F9EC94975799789C25E7836F5BA38837F7BF9` |
+| complete `m1n1-p0.patch` | `D4B2C6B60C5929AD8174F68326B8F85CD4C3972DA3CEF19B5F9290274247901F` |
+| `build-manifest.json` | `81DBF5DF5600894144ED794A74C03ADBD6CCA00CEEF9FD69706694241C269058` |
+| `test_usb_cdc.py` | `AD841EA2266EBFB623DDB321CAB114CB69BE6A038295DE30053799C76A2FDD7E` |
+
+The frozen source, patch, manifest and payload are stored under
+`artifacts/p0-usb/payloads/epena-xfrc-32daff69/`; the review record is
+`artifacts/p0-usb/epena-xfrc-candidate/RESULT.md`. Session-y payload
+`39543DDB...740B` remains the latest physically tested artifact and is not
+overwritten.
+
+Primary references: [ST RM0386 Rev 6](https://www.st.com/resource/en/reference_manual/dm00127514.pdf),
+[upstream Linux DWC2 gadget implementation](https://github.com/torvalds/linux/blob/3dab139d4795f688e4f243e40c7474df00d329d9/drivers/usb/dwc2/gadget.c).
+
+### One physical validation boundary
+
+The next trial, if the live target is freshly in DFU, uses new directory
+`artifacts/p0-usb/session-z-epena-xfrc` and the existing three-stage passive
+procedure:
+
+```powershell
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Checkm8 -OutputDirectory artifacts/p0-usb/session-z-epena-xfrc
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Pongo -OutputDirectory artifacts/p0-usb/session-z-epena-xfrc
+& .\windows-native\internal-storage\p0\Invoke-PassiveEnumerationTrace.ps1 -OutputDirectory artifacts/p0-usb/session-z-epena-xfrc -ApprovedPayloadSha256 32DAFF697B7F66BE5335A1B020A7310993074607E08116D440DA9F47CA6D96A9 -ObservationSeconds 35
+```
+
+Each command is run at most once and only after the previous saved result and
+identity, ordered USB(4)/HS04 location, driver, artifact and safety gates pass.
+The last wrapper starts ETW before its single RAM payload transfer and adds no
+tool-originated descriptor request, COM open, reset, disconnect/re-enumeration
+or retry. Result A is a successful seven-byte second GET after the known
+SET/DTR prefix; B is the same STALL boundary; C is an earlier/new failure; D is
+missing or uncorrelatable traffic. Every result stops. It cannot validate COM
+or P_NOP in the same passive trial and never reaches ANS or NAND.
+
+### Session z preflight inventory save failure
+
+After the user authorized the necessary physical operations, the read-only
+preflight inventory command was invoked once before any Checkm8 stage. It
+exited 1 when `Set-Content` found that the new session directory did not yet
+exist. No inventory JSON was saved; therefore live DFU identity, driver,
+ordered location and state remain unverified. Any PnP objects the script may
+have enumerated in memory are not substituted for the missing evidence.
+
+The failure was not retried. None of the three Session-z stage commands was
+run, and there was no Checkm8, Pongo, payload transfer, active USB request, COM
+open, reset, disconnect/re-enumeration, P_NOP, ANS or NAND operation. The exact
+record is `artifacts/p0-usb/session-z-epena-xfrc/PREFLIGHT-FAILURE.md`. A future
+attempt must first create the local output directory and obtain a fresh
+instruction before rerunning the inventory; it must not infer that the target
+is still in DFU from the failed command.
+
+The host-only cause was corrected after stopping the session attempt.
+`Collect-TransportInventory.ps1` now resolves the requested output path and
+creates its parent directory before PnP enumeration and JSON persistence. A
+new offline test replaces `Get-PnpDevice` with an empty mock and verifies that
+a previously absent nested session directory is created, contains valid `[]`
+JSON, and reports zero candidates without USB access. All 21 P0 host test files
+then passed, including the A/B EPENA matrix and the existing startup-object
+inspection. This correction did not rerun inventory and does not establish the
+current device state.
+
+| Host correction | SHA-256 |
+| --- | --- |
+| `Collect-TransportInventory.ps1` | `C8AB7FBA372FECF4B29AF36A74DA12AF7BBD714E6810B69D6C868392030E78D6` |
+| `test_inventory_output.py` | `F3198C753E70F74D5547C97448B5DEC4C52FCC602459F6C5C528A87410AA31A0` |

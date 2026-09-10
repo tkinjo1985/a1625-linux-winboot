@@ -1,5 +1,10 @@
 param([Parameter(Mandatory=$true)][string]$OutputPath)
 $ErrorActionPreference = 'Stop'
+$resolvedOutputPath = [IO.Path]::GetFullPath($OutputPath)
+$outputDirectory = Split-Path -Parent $resolvedOutputPath
+if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
+    New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+}
 $records = @(Get-PnpDevice -PresentOnly | Where-Object InstanceId -match '^USB\\VID_1209&PID_316D' | ForEach-Object {
     $device = $_
     $properties = @{}
@@ -23,6 +28,6 @@ $records = @(Get-PnpDevice -PresentOnly | Where-Object InstanceId -match '^USB\\
         current_boot_verified = $false
     }
 })
-ConvertTo-Json -InputObject $records -Depth 6 | Set-Content -LiteralPath $OutputPath -Encoding utf8
+ConvertTo-Json -InputObject $records -Depth 6 | Set-Content -LiteralPath $resolvedOutputPath -Encoding utf8
 # Keep individual serial/instance information in the artifact, out of public logs.
 Write-Output "Saved $($records.Count) candidate(s). No port opened or packet sent."
