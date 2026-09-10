@@ -9,7 +9,8 @@ if(Test-Path -LiteralPath $OutputDirectory){throw 'Output directory already exis
 
 $root=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $identityFull=(Resolve-Path -LiteralPath $IdentityPath).Path
-$items=@(Get-Content -LiteralPath $identityFull -Raw | ConvertFrom-Json)
+$parsed=Get-Content -LiteralPath $identityFull -Raw | ConvertFrom-Json
+$items=@($parsed | ForEach-Object {$_})
 if($items.Count -ne 1){throw "Expected one identity candidate, found $($items.Count)"}
 $identity=$items[0]
 $devices=@(Get-PnpDevice -PresentOnly | Where-Object InstanceId -eq $identity.instance_id)
@@ -41,6 +42,17 @@ $recordPath=Join-Path $outFull 'session.json'
 $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $recordPath -Encoding utf8
 $process=$null
 $traceStarted=$false
+function Stop-ProbeChild {
+    param([Diagnostics.Process]$Child,[int]$WaitSeconds=15)
+    if(-not $Child -or $Child.HasExited){return $true}
+    Stop-Process -Id $Child.Id -Force -ErrorAction SilentlyContinue
+    $deadline=[DateTimeOffset]::Now.AddSeconds($WaitSeconds)
+    do{
+        if($Child.WaitForExit(250)){return $true}
+        $Child.Refresh()
+    }while([DateTimeOffset]::Now -lt $deadline)
+    return $Child.HasExited
+}
 try{
     & logman.exe start $session -p 'Microsoft-Windows-USB-UCX' 0xffffffffffffffff 0xff -o $etl -ets | Out-Null
     if($LASTEXITCODE -ne 0){throw "logman start failed: $LASTEXITCODE"}
@@ -52,10 +64,11 @@ try{
     }finally{$env:PYTHONPATH=$oldPythonPath}
     $record.com_open_attempts=1
     if(-not $process.WaitForExit($TimeoutSeconds * 1000)){
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        [void]$process.WaitForExit(5000)
         $record.status='failed'
-        $record.error="COM open exceeded $TimeoutSeconds-second deadline; exact child stopped; no retry"
+        $stopped=Stop-ProbeChild -Child $process
+        $record.child_stopped=$stopped
+        $record.error=if($stopped){"COM open exceeded $TimeoutSeconds-second deadline; exact child stopped; no retry"}
+                      else{"COM open exceeded $TimeoutSeconds-second deadline; exact child termination not confirmed; no retry"}
     }else{
         $record.exit_code=$process.ExitCode
         $result=Get-Content -LiteralPath (Join-Path $probeOut 'result.json') -Raw | ConvertFrom-Json
@@ -65,10 +78,12 @@ try{
 }catch{
     $record.status='failed';$record.error=$_.Exception.Message
 }finally{
-    if($process -and -not $process.HasExited){Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue}
+    if($process -and -not $process.HasExited){$record.child_stopped=Stop-ProbeChild -Child $process}
     if($process){$process.Dispose()}
     if($traceStarted){& logman.exe stop $session -ets | Out-Null}
     if(Test-Path -LiteralPath $etl){& tracerpt.exe $etl -of XML -o $xml -y | Out-Null}
+    $evidence=@($etl,$xml,(Join-Path $probeOut 'result.json') | Where-Object {Test-Path -LiteralPath $_})
+    $record.evidence_hashes=@(Get-FileHash -Algorithm SHA256 -LiteralPath $evidence | Select-Object Path,Hash)
     $record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $recordPath -Encoding utf8
 }
 Write-Output "COM trace : $($record.status)"

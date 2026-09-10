@@ -1484,6 +1484,44 @@ index fd6773a..4ce423d 100644
                  exc_count = 0;
                  exc_guard = GUARD_SKIP;
                  if (request.mrequest.size != 0) {
+diff --git a/src/usb.c b/src/usb.c
+index fce0d5d..6091c33 100644
+--- a/src/usb.c
++++ b/src/usb.c
+@@ -213,7 +213,9 @@ dwc3_dev_t *usb_iodev_bringup(u32 idx)
+         usb_##driver##_flush(dev, pipe);                                                           \
+     }
+ 
++#ifndef ANS1_P0
+ USB_IODEV_WRAPPER(dwc2, 0, CDC_ACM_PIPE_0)
++#endif
+ USB_IODEV_WRAPPER(dwc2, 1, CDC_ACM_PIPE_1)
+ 
+ USB_IODEV_WRAPPER(dwc3, 0, CDC_ACM_PIPE_0)
+@@ -230,7 +232,9 @@ USB_IODEV_WRAPPER(dwc3, 1, CDC_ACM_PIPE_1)
+         .handle_events = usb_##driver##_##name##_handle_events,                                    \
+     }
+ 
++#ifndef ANS1_P0
+ static struct iodev_ops iodev_usb_dwc2_ops = USB_IODEV_OPS(dwc2, 0, CDC_ACM_PIPE_0);
++#endif
+ static struct iodev_ops iodev_usb_dwc2_sec_ops = USB_IODEV_OPS(dwc2, 1, CDC_ACM_PIPE_1);
+ 
+ static struct iodev_ops iodev_usb_dwc3_ops = USB_IODEV_OPS(dwc3, 0, CDC_ACM_PIPE_0);
+@@ -383,7 +387,13 @@ int usb_complex_init(struct usb_complex_config *config)
+     if (!usb_iodev)
+         return -1;
+ 
++#ifdef ANS1_P0
++    /* Windows binds this non-IAD dual-CDC device to management interface 2
++     * (data interface 3). Keep the P0 proxy on the pipe the host can open. */
++    usb_iodev->ops = &iodev_usb_dwc2_sec_ops;
++#else
+     usb_iodev->ops = &iodev_usb_dwc2_ops;
++#endif
+     usb_iodev->opaque = opaque;
+     usb_iodev->usage = USAGE_CONSOLE | USAGE_UARTPROXY;
+     spin_init(&usb_iodev->lock);
 diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
 index 9220d62..9798226 100644
 --- a/src/usb_dwc2.c

@@ -5,6 +5,10 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 source = (ROOT / 'third_party/HoolockLinux-m1n1-p0/src/usb_dwc2.c').read_text()
+usb_source = (ROOT / 'third_party/HoolockLinux-m1n1-p0/src/usb.c').read_text()
+assert '#ifdef ANS1_P0\n    /* Windows binds this non-IAD dual-CDC device to management interface 2' in usb_source
+assert 'usb_iodev->ops = &iodev_usb_dwc2_sec_ops;' in usb_source
+assert '#else\n    usb_iodev->ops = &iodev_usb_dwc2_ops;' in usb_source
 def function(signature):
     start = source.index(signature + '\n{')
     return source[start:source.index('\n}', start) + 2]
@@ -181,4 +185,4 @@ gcc = Path.home() / 'scoop/apps/msys2/current/ucrt64/bin/gcc.exe'
 os.environ['PATH'] = str(gcc.parent) + os.pathsep + os.environ['PATH']
 subprocess.run([str(gcc), '-std=c11', str(out/'cdc.c'), '-o', str(out/'cdc.exe')], check=True)
 subprocess.run([str(out/'cdc.exe')], check=True)
-print('CDC request/completion, EP0 interleaving and software reset tests passed; hardware timing unverified')
+print('CDC request/completion, P0 pipe-1 binding, EP0 interleaving and software reset tests passed; hardware timing unverified')

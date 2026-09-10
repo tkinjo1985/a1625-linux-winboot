@@ -273,3 +273,29 @@ runs exactly one `trace_open.py` COM-only attempt, stops that exact child after
 the 5--30 second bounded deadline, and always stops and converts the trace.
 The wrapper records zero P_NOP, ANS and NAND-read requests and refuses an
 existing output directory, so a failed session cannot be silently repeated.
+
+Approved trace session `artifacts/p0-usb/session-20260910-o/com-trace` made one
+bounded COM-open attempt against that same already-running session-n payload.
+UCX recorded one pending CDC `GET_LINE_CODING` control transfer
+(`bmRequestType=0xA1`, `bRequest=0x21`, `wIndex=2`, `wLength=7`, URB
+`0xFFFFE20A029A6FA8`) and no matching completion. It recorded zero
+`SET_LINE_CODING`, P_NOP, ANS and NAND-read requests. Because this was the
+already-wedged boot rather than the first COM open after a fresh payload boot,
+it identifies the outstanding request but does not independently establish
+that every fresh boot fails at the same point. The ETL SHA-256 is
+`BB88FA19C4843ED1C0A1320143ED159D712E96C7A138800BBED7A8748DCB57A8`; the
+converted XML SHA-256 is
+`49592B8F4D229396E73113545013942942F319D4BA0E7E62BCBE915B6149B8FD`.
+
+Source inspection also found that the P0 DWC2 proxy iodev still selected CDC
+pipe 0, while Windows binds COM to management interface 2 and data interface 3,
+which are CDC pipe 1. The `ANS1_P0` build now selects
+`iodev_usb_dwc2_sec_ops`; non-P0 builds retain pipe 0. This fixes the later
+P_NOP data path but is not claimed to fix or validate the controller-wide EP0
+`GET_LINE_CODING` completion. The rebuilt P0 payload SHA-256 is
+`A3ACCAB2E941F666B4B8863EB7FFA4F775FD3D920A972315792DB56C067A0DEC`, and the
+reproducible patch SHA-256 is
+`2548A6515311F0CFABC35AC2DCFE23A3564B2E030212CB59CF4FBC827BB1373E`. Symbol
+inspection of the final P0 `usb.o` found only the DWC2 pipe-1 proxy operations.
+The currently booted device still contains the older payload, so this change
+has not been exercised on hardware.
