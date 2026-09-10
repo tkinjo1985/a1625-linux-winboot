@@ -119,7 +119,7 @@ index 182115d..f05fc8e 100644
 +    return akf_fw_get_region_old(fw_node, phys, iova, size);
  }
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..a4bde0b 100644
+index 9f771d2..17dcff5 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -291,7 +291,7 @@ index 9f771d2..a4bde0b 100644
  
      dma_rmb();
  
-@@ -353,34 +306,45 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
+@@ -353,34 +306,48 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
  
  bool ans1_init(void)
  {
@@ -337,6 +337,9 @@ index 9f771d2..a4bde0b 100644
      if (!ans1_rtkit)
 -        goto out_free_cmd;
 +        goto out_shutdown;
++
++    if (!rtkit_p0_set_command_buffer(ans1_rtkit, (u64)cmd))
++        goto out_shutdown;
  
      if (!rtkit_boot(ans1_rtkit))
 -        goto out_rtkit;
@@ -344,7 +347,7 @@ index 9f771d2..a4bde0b 100644
  
      if (!ans1_ready && !ans1_wait_for_tag(ans1_rtkit, ANS1_COMPLETION_TAG_READY))
          goto out_shutdown;
-@@ -409,36 +373,72 @@ bool ans1_init(void)
+@@ -409,36 +376,72 @@ bool ans1_init(void)
              goto out_shutdown;
      }
  
@@ -382,7 +385,7 @@ index 9f771d2..a4bde0b 100644
 +    ans1_initialized = false;
 +    ans1_ready = false;
 +    if (ans1_stop_attempted)
-         return;
++        return;
 +    ans1_stop_attempted = true;
 +    bool slept = false;
 +    if (ans1_rtkit)
@@ -397,7 +400,7 @@ index 9f771d2..a4bde0b 100644
 +        ans1_cpu_clear = true;
 +    } else if (ans1_powered) {
 +        printf("ANS1-P0: no CPU readback; retain power\n");
-+        return;
+         return;
 +    }
 +    /* CPU readback does not prove DMA quiescence. Retain every allocation,
 +     * firmware mapping and power state until a manual power cycle. */
@@ -471,25 +474,62 @@ index 17e992c..ff5b0e2 100644
              reply->retval = main_storage_init();
              break;
 diff --git a/src/rtkit.c b/src/rtkit.c
-index 1e15405..36f1c72 100644
+index 1e15405..69406e4 100644
 --- a/src/rtkit.c
 +++ b/src/rtkit.c
-@@ -127,6 +127,9 @@ struct rtkit_dev {
+@@ -13,6 +13,9 @@
+ #include "string.h"
+ #include "types.h"
+ #include "utils.h"
++#ifdef ANS1_P0
++#include "rtkit_p0.h"
++#endif
+ 
+ #define rtkit_printf(...)                                                                          \
+     do {                                                                                           \
+@@ -127,6 +130,10 @@ struct rtkit_dev {
      u32 syslog_cnt, syslog_size;
  
      bool crashed;
 +#ifdef ANS1_P0
 +    unsigned int p0_tx_count, p0_rx_count;
++    struct rtkit_p0_policy p0;
 +#endif
  };
  
  struct syslog_log {
-@@ -246,17 +249,37 @@ static bool rtkit_akf_can_recv(struct rtkit_dev *rtk)
+@@ -243,20 +250,63 @@ static bool rtkit_akf_can_recv(struct rtkit_dev *rtk)
+     return akf_can_recv((akf_dev_t *)rtk->mbox);
+ }
+ 
++#ifdef ANS1_P0
++static bool rtkit_p0_allow(struct rtkit_dev *rtk, const struct rtkit_message *msg)
++{
++    struct rtkit_buffer *bfr = NULL;
++    if (msg->ep == RTKIT_EP_CRASHLOG)
++        bfr = &rtk->crashlog_bfr;
++    if (msg->ep == RTKIT_EP_SYSLOG)
++        bfr = &rtk->syslog_bfr;
++    if (msg->ep == RTKIT_EP_IOREPORT)
++        bfr = &rtk->ioreport_bfr;
++    return rtkit_p0_tx(&rtk->p0, msg->ep, msg->msg,
++                       bfr ? bfr->dva : 0, bfr ? bfr->sz : 0);
++}
++
++bool rtkit_p0_set_command_buffer(rtkit_dev_t *rtk, u64 addr)
++{
++    if (!addr || (addr & 0xfff) || (addr >> 40) || rtk->p0.cmd || rtk->p0_tx_count)
++        return false;
++    rtk->p0.cmd = addr;
++    return true;
++}
++#endif
++
  static bool rtkit_akf_send(struct rtkit_dev *rtk, const struct rtkit_message *rtk_msg)
  {
      u64 akf_msg = 0;
 +#ifdef ANS1_P0
-+    if (rtk->crashed || rtk->p0_tx_count >= 128) {
++    if (rtk->crashed || rtk->p0_tx_count >= 128 || !rtkit_p0_allow(rtk, rtk_msg)) {
 +        rtk->crashed = true;
 +        return false;
 +    }
@@ -523,19 +563,20 @@ index 1e15405..36f1c72 100644
  
      recv = akf_recv((akf_dev_t *)rtk->mbox, &akf_msg);
      if (!recv)
-@@ -264,6 +287,11 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
+@@ -264,6 +314,12 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
  
      rtk_msg->msg = FIELD_GET(RTKIT_AKF_MSG_MSG, akf_msg);
      rtk_msg->ep = FIELD_GET(RTKIT_AKF_MSG_EP, akf_msg);
 +#ifdef ANS1_P0
 +    ++rtk->p0_rx_count;
++    rtkit_p0_observe(&rtk->p0, rtk_msg->ep, rtk_msg->msg);
 +    printf("ANS1-P0: RTKit RX n=%u ep=0x%x value=0x%lx\n",
 +           rtk->p0_rx_count, rtk_msg->ep, rtk_msg->msg);
 +#endif
  
      return true;
  }
-@@ -271,6 +299,15 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
+@@ -271,6 +327,15 @@ static bool rtkit_akf_recv(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg)
  static bool rtkit_akf_recv_timeout(struct rtkit_dev *rtk, struct rtkit_message *rtk_msg,
                                     u32 delay_usec)
  {
@@ -551,7 +592,7 @@ index 1e15405..36f1c72 100644
      u64 akf_msg;
      bool recv;
  
-@@ -282,6 +319,7 @@ static bool rtkit_akf_recv_timeout(struct rtkit_dev *rtk, struct rtkit_message *
+@@ -282,6 +347,7 @@ static bool rtkit_akf_recv_timeout(struct rtkit_dev *rtk, struct rtkit_message *
      rtk_msg->ep = FIELD_GET(RTKIT_AKF_MSG_EP, akf_msg);
  
      return true;
@@ -559,7 +600,7 @@ index 1e15405..36f1c72 100644
  }
  
  static const struct rtkit_iop_ops __rtkit_akf_iop_ops = {
-@@ -356,6 +394,12 @@ out_free_rtk:
+@@ -356,6 +422,12 @@ out_free_rtk:
  
  void rtkit_free(rtkit_dev_t *rtk)
  {
@@ -572,7 +613,7 @@ index 1e15405..36f1c72 100644
      rtkit_free_buffer(rtk, &rtk->syslog_bfr);
      rtkit_free_buffer(rtk, &rtk->crashlog_bfr);
      rtkit_free_buffer(rtk, &rtk->ioreport_bfr);
-@@ -402,6 +446,10 @@ bool rtkit_map(rtkit_dev_t *rtk, void *phys, size_t sz, u64 *dva)
+@@ -402,6 +474,10 @@ bool rtkit_map(rtkit_dev_t *rtk, void *phys, size_t sz, u64 *dva)
  
  bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
  {
@@ -583,7 +624,7 @@ index 1e15405..36f1c72 100644
      if (rtk->sart) {
          if (!sart_remove_allowed_region(rtk->sart, (void *)dva, sz))
              rtkit_printf("sart_remove_allowed_region failed (0x%lx, 0x%lx)\n", dva, sz);
-@@ -418,6 +466,7 @@ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
+@@ -418,6 +494,7 @@ bool rtkit_unmap(rtkit_dev_t *rtk, u64 dva, size_t sz)
  
  bool rtkit_alloc_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr, size_t sz)
  {
@@ -591,7 +632,7 @@ index 1e15405..36f1c72 100644
      bfr->bfr = memalign(SZ_16K, sz);
      if (!bfr->bfr) {
          rtkit_printf("unable to allocate %zu buffer\n", sz);
-@@ -440,6 +489,10 @@ error:
+@@ -440,6 +517,10 @@ error:
  
  bool rtkit_free_buffer(rtkit_dev_t *rtk, struct rtkit_buffer *bfr)
  {
@@ -602,7 +643,7 @@ index 1e15405..36f1c72 100644
      if (!bfr->bfr || !is_heap(bfr->bfr))
          return true;
  
-@@ -458,6 +511,14 @@ static bool rtkit_handle_buffer_request(rtkit_dev_t *rtk, struct rtkit_message *
+@@ -458,6 +539,14 @@ static bool rtkit_handle_buffer_request(rtkit_dev_t *rtk, struct rtkit_message *
      size_t sz = n_4kpages << 12;
      u64 addr = FIELD_GET(MSG_BUFFER_REQUEST_IOVA, msg->msg);
  
@@ -617,7 +658,7 @@ index 1e15405..36f1c72 100644
      if (rtk->sram) {
          if (!addr) {
              rtkit_printf("SRAM buffers needs to be provided by the IOP\n");
-@@ -512,6 +573,13 @@ static void rtkit_crashed(rtkit_dev_t *rtk)
+@@ -512,6 +601,13 @@ static void rtkit_crashed(rtkit_dev_t *rtk)
      struct crashlog_hdr *hdr = rtk->crashlog_bfr.bfr;
      rtk->crashed = true;
  
@@ -631,7 +672,7 @@ index 1e15405..36f1c72 100644
      rtkit_printf("IOP crashed!\n");
  
      if (hdr->type != 'CLHE') {
-@@ -550,7 +618,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+@@ -550,7 +646,8 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
      if (rtk->crashed)
          return -1;
  
@@ -641,7 +682,15 @@ index 1e15405..36f1c72 100644
          /* if this is an app message we can just forward it to the caller */
          if (msg->ep >= rtk->app_ep_start)
              return 1;
-@@ -589,8 +658,10 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+@@ -567,6 +664,7 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+                         break;
+                     default:
+                         rtkit_printf("unknown management message %x\n", msgtype);
++                        return -1;
+                 }
+                 break;
+             case RTKIT_EP_SYSLOG:
+@@ -589,11 +687,14 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
                              printf("\n");
                      }
  #endif
@@ -653,7 +702,19 @@ index 1e15405..36f1c72 100644
                          break;
                      default:
                          rtkit_printf("unknown syslog message %x\n", msgtype);
-@@ -618,8 +689,10 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
++                        return -1;
+                 }
+                 break;
+             case RTKIT_EP_CRASHLOG:
+@@ -608,6 +709,7 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
+                         break;
+                     default:
+                         rtkit_printf("unknown crashlog message %x\n", msgtype);
++                        return -1;
+                 }
+                 break;
+             case RTKIT_EP_IOREPORT:
+@@ -618,18 +720,22 @@ int rtkit_recv(rtkit_dev_t *rtk, struct rtkit_message *msg)
                      /* unknown but must be ACKed */
                      case 0x8:
                      case 0xc:
@@ -665,7 +726,20 @@ index 1e15405..36f1c72 100644
                          break;
                      default:
                          rtkit_printf("unknown ioreport message %x\n", msgtype);
-@@ -661,6 +734,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
++                        return -1;
+                 }
+                 break;
+             case RTKIT_EP_OSLOG:
+                 rtkit_printf("unknown oslog message %lx\n", msg->msg);
+-                break;
++                return -1;
+             default:
+                 rtkit_printf("message to unknown system endpoint 0x%02x: %lx\n", msg->ep, msg->msg);
++                return -1;
+         }
+ 
+         if (!ok) {
+@@ -661,6 +767,7 @@ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep)
  bool rtkit_boot(rtkit_dev_t *rtk)
  {
      struct rtkit_message msg;
@@ -673,7 +747,7 @@ index 1e15405..36f1c72 100644
  
      /* boot the IOP if it isn't already */
      rtk->iop_ops->cpu_start(rtk);
-@@ -728,6 +802,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -728,6 +835,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
      bool got_epmap = false;
  
      while (!got_epmap) {
@@ -682,7 +756,7 @@ index 1e15405..36f1c72 100644
          if (!rtk->iop_ops->recv_timeout(rtk, &msg, USEC_PER_SEC)) {
              rtkit_printf("couldn't receive message while waiting for endpoint map\n");
              return false;
-@@ -815,6 +891,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -815,6 +924,8 @@ bool rtkit_boot(rtkit_dev_t *rtk)
          return false;
  
      while (rtk->iop_power != RTKIT_POWER_ON) {
@@ -691,7 +765,20 @@ index 1e15405..36f1c72 100644
          struct rtkit_message rtk_msg;
          bool handled = false;
          int ret = rtkit_recv(rtk, &rtk_msg);
-@@ -847,6 +925,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+@@ -826,9 +937,11 @@ bool rtkit_boot(rtkit_dev_t *rtk)
+             if (rtk->init_app_handler)
+                 handled = rtk->init_app_handler(rtk, &rtk_msg);
+ 
+-            if (!handled)
++            if (!handled) {
+                 rtkit_printf("unexpected message to non-system endpoint 0x%02x during boot: %lx\n",
+                              rtk_msg.ep, rtk_msg.msg);
++                return false;
++            }
+         }
+     }
+ 
+@@ -847,6 +960,7 @@ bool rtkit_boot(rtkit_dev_t *rtk)
  static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state target)
  {
      struct rtkit_message msg;
@@ -699,7 +786,7 @@ index 1e15405..36f1c72 100644
  
      if (rtk->crashed)
          return false;
-@@ -861,6 +940,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -861,6 +975,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->ap_power != RTKIT_POWER_QUIESCED) {
@@ -708,7 +795,21 @@ index 1e15405..36f1c72 100644
          /* Workaround for iOS 10 RTKit acknowledging AP power state 0x0 during sleep */
          if (rtk->protocol_ver < 11 && rtk->ap_power == RTKIT_POWER_OFF)
              break;
-@@ -891,6 +972,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+@@ -873,10 +989,12 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+             if (rtk->init_app_handler)
+                 handled = rtk->init_app_handler(rtk, &rtk_msg);
+ 
+-            if (!handled)
++            if (!handled) {
+                 rtkit_printf(
+                     "unexpected message to non-system endpoint 0x%02x during shutdown: %lx\n",
+                     rtk_msg.ep, rtk_msg.msg);
++                return false;
++            }
+             continue;
+         } else if (ret < 0) {
+             rtkit_printf("IOP died during shutdown\n");
+@@ -891,6 +1009,8 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
      }
  
      while (rtk->iop_power != target) {
@@ -717,7 +818,21 @@ index 1e15405..36f1c72 100644
          struct rtkit_message rtk_msg;
          int ret = rtkit_recv(rtk, &rtk_msg);
          bool handled = false;
-@@ -920,12 +1003,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
+@@ -899,10 +1019,12 @@ static bool rtkit_switch_power_state(rtkit_dev_t *rtk, enum rtkit_power_state ta
+             if (rtk->init_app_handler)
+                 handled = rtk->init_app_handler(rtk, &rtk_msg);
+ 
+-            if (!handled)
++            if (!handled) {
+                 rtkit_printf(
+                     "unexpected message to non-system endpoint 0x%02x during shutdown: %lx\n",
+                     rtk_msg.ep, rtk_msg.msg);
++                return false;
++            }
+             continue;
+         } else if (ret < 0) {
+             rtkit_printf("IOP died during shutdown\n");
+@@ -920,12 +1042,11 @@ bool rtkit_quiesce(rtkit_dev_t *rtk)
  
  bool rtkit_sleep(rtkit_dev_t *rtk)
  {
@@ -733,3 +848,170 @@ index 1e15405..36f1c72 100644
  }
  
  u8 rtkit_protocol_version(rtkit_dev_t *rtk)
+diff --git a/src/rtkit.h b/src/rtkit.h
+index c896152..d82ea78 100644
+--- a/src/rtkit.h
++++ b/src/rtkit.h
+@@ -41,6 +41,9 @@ void rtkit_free(rtkit_dev_t *rtk);
+ 
+ bool rtkit_start_ep(rtkit_dev_t *rtk, u8 ep);
+ bool rtkit_boot(rtkit_dev_t *rtk);
++#ifdef ANS1_P0
++bool rtkit_p0_set_command_buffer(rtkit_dev_t *rtk, u64 addr);
++#endif
+ 
+ bool rtkit_can_recv(rtkit_dev_t *rtk);
+ 
+diff --git a/src/rtkit_p0.h b/src/rtkit_p0.h
+new file mode 100644
+index 0000000..05858e8
+--- /dev/null
++++ b/src/rtkit_p0.h
+@@ -0,0 +1,147 @@
++/* P0 outbound protocol policy. Storage opcodes are checked separately in ans1.c. */
++#ifndef RTKIT_P0_H
++#define RTKIT_P0_H
++
++#define P0_TYPE(t) ((u64)(t) << 52)
++struct rtkit_p0_policy {
++    u64 cmd, last[256];
++    u32 advertised[8];
++    bool pending[256], started[256], buffer_sent[256], map_seen[8];
++    bool init, hello, map_done, ap_on, quiesce, sleep, ready, cmd_ready;
++    bool cmd_sent, tag_sent, inflight;
++    u8 app_ep, version, rings;
++};
++
++static inline void rtkit_p0_observe(struct rtkit_p0_policy *p, u8 ep, u64 msg)
++{
++    p->last[ep] = msg;
++    p->pending[ep] = true;
++    if (ep == p->app_ep && p->app_ep && p->started[ep]) {
++        if (msg == 0xafe2)
++            p->ready = true;
++        if (msg == 0xafd2 && p->cmd_sent)
++            p->cmd_ready = true;
++        if (msg == 2 && p->inflight)
++            p->inflight = false;
++    }
++}
++
++/* own_addr/own_size describe the retained RTKit allocation for this endpoint. */
++static inline bool rtkit_p0_tx(struct rtkit_p0_policy *p, u8 ep, u64 msg,
++                               u64 own_addr, u64 own_size)
++{
++    if (!p->cmd || msg >> 56)
++        return false;
++    u64 incoming = p->last[ep];
++    if (!ep) {
++        if (msg == (P0_TYPE(6) | 0x220) && !p->init) {
++            p->init = true;
++            return true;
++        }
++        if (p->init && !p->hello && p->pending[0] && incoming >> 52 == 1) {
++            u32 lo = incoming & 0xffff, hi = (incoming >> 16) & 0xffff;
++            u32 version = hi < 12 ? hi : 12;
++            if (version >= 10 && lo <= version &&
++                msg == (P0_TYPE(2) | ((u64)version << 16) | version)) {
++                p->version = version;
++                p->hello = true;
++                p->pending[0] = false;
++                return true;
++            }
++        }
++        if (!p->hello)
++            return false;
++        if (p->pending[0] && incoming >> 52 == 8 && !p->map_done) {
++            u32 base = (incoming >> 32) & 7;
++            bool done = (incoming & ((u64)1 << 51)) || p->version == 10;
++            u64 expected = P0_TYPE(8) | ((u64)base << 32);
++            if (p->version > 10)
++                expected |= done ? ((u64)1 << 51) : 1;
++            if (!p->map_seen[base] && msg == expected) {
++                p->advertised[base] = (u32)incoming;
++                p->map_seen[base] = true;
++                p->map_done = done;
++                p->pending[0] = false;
++                return true;
++            }
++        }
++        if (msg >> 52 == 5 && !p->quiesce) {
++            u32 target = (msg >> 32) & 0xff;
++            bool system = target >= 1 && target <= 4;
++            system |= target == 8 && p->version > 10;
++            u32 chosen = p->version > 10 ? 32 :
++                         (p->advertised[0] & (1U << 6)) ? 6 : 5;
++            if (msg == (P0_TYPE(5) | ((u64)target << 32) | 2) &&
++                (system || target == chosen) && !p->started[target] &&
++                (p->advertised[target / 32] & (1U << (target % 32)))) {
++                if (!system) {
++                    if (p->app_ep)
++                        return false;
++                    p->app_ep = target;
++                }
++                p->started[target] = true;
++                return true;
++            }
++        }
++        if (msg == (P0_TYPE(0xb) | 0x20) && p->map_done && !p->ap_on && !p->quiesce &&
++            p->pending[0] && incoming == (P0_TYPE(7) | 0x20)) {
++            p->ap_on = true;
++            return true;
++        }
++        if (msg == (P0_TYPE(0xb) | 0x10) && !p->quiesce) {
++            p->quiesce = true;
++            return true;
++        }
++        if (msg == (P0_TYPE(6) | 1) && p->quiesce && !p->sleep &&
++            p->pending[0] && (incoming == (P0_TYPE(0xb) | 0x10) ||
++                             (p->version == 10 && incoming == P0_TYPE(0xb)))) {
++            p->sleep = true;
++            p->pending[0] = false;
++            return true;
++        }
++        return false;
++    }
++    if (!p->started[ep])
++        return false;
++    if (ep == p->app_ep) {
++        if (p->quiesce)
++            return false;
++        if (p->ap_on && !p->cmd_sent && p->ready && msg == ((p->cmd << 16) | 0x20)) {
++            p->cmd_sent = true;
++            return true;
++        }
++        if (p->cmd_ready && !p->tag_sent && msg == 0x2000001) {
++            p->tag_sent = true;
++            return true;
++        }
++        if (p->tag_sent && msg == 0xff003 && p->rings < 5 && !p->inflight) {
++            p->rings++;
++            p->inflight = true;
++            return true;
++        }
++        return false;
++    }
++    if (!p->pending[ep])
++        return false;
++    if ((ep == 1 || ep == 2 || ep == 4) && incoming >> 52 == 1 &&
++        !p->buffer_sent[ep] && !(incoming & (((u64)1 << 42) - 1))) {
++        u64 pages = (incoming >> 44) & 0xff;
++        if (pages && own_addr && !(own_addr & 0x3fff) && !(own_addr >> 42) &&
++            own_size == ((pages * 4096 + 16383) & ~(u64)16383) &&
++            msg == (P0_TYPE(1) | (pages << 44) | own_addr)) {
++            p->buffer_sent[ep] = true;
++            p->pending[ep] = false;
++            return true;
++        }
++    }
++    /* Replies echo only a recognized incoming notification, once per RX. */
++    if (msg == incoming &&
++        ((ep == 2 && incoming >> 52 == 5 && !(incoming & ~(P0_TYPE(15) | 0xff)) &&
++          p->buffer_sent[ep]) ||
++         (ep == 4 && (incoming == P0_TYPE(8) || incoming == P0_TYPE(0xc)) && p->buffer_sent[ep]))) {
++        p->pending[ep] = false;
++        return true;
++    }
++    return false;
++}
++#endif

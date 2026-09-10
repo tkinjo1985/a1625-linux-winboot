@@ -23,6 +23,8 @@ are resolved. Do not substitute a Boolean edit for completing the preflight.
 - Boolean rtkit_sleep result, bounded boot/power-state waits and bounded RX batches.
   AKF transport has a cumulative 128 TX-attempt / 512 RX-message limit, including
   boot's timed RX path. TX failure latches an error; system ACK failures propagate.
+  A stateful outbound management/registration policy runs at the AKF RTKit
+  transport boundary; see [rtkit-allowlist.md](rtkit-allowlist.md).
 - ANS1 one-attempt-per-boot latch; fresh endpoint/READY state; target check before power.
 - Unified init unwind, one sleep attempt followed by explicit CPU-start-bit
   clear/readback. CPU clear is not DMA-stop proof: retain command/RTKit/AKF
@@ -54,7 +56,8 @@ patch, and builds build/m1n1.bin using CHAINLOADING=1 and ANS1_P0. Then run
 write-manifest.py with Windows Python to record source revision, feature origin,
 patch hash, Cargo lock hash, linker-wrapper hash and m1n1.bin SHA-256.
 
-Run test_commands.py, test_unwind.py, test_rtkit_retention.py and test_rtkit_budget.py
+Run test_commands.py, test_unwind.py, test_rtkit_retention.py, test_rtkit_budget.py,
+test_rtkit_policy.py and test_firmware_region.py
 with Windows Python. They exercise
 actual source function bodies with mocked transports/allocators. They cover
 all 256 opcodes, invalid tag/length/LBA/flags/address, failure latching, bool

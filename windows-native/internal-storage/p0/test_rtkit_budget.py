@@ -14,7 +14,13 @@ prefix = r'''
 #include <stdio.h>
 typedef uint64_t u64; typedef uint32_t u32; typedef int akf_dev_t;
 struct rtkit_message { unsigned char ep; u64 msg; };
-struct rtkit_dev { void *mbox; bool crashed; unsigned p0_tx_count,p0_rx_count; };
+struct rtkit_dev { void *mbox; bool crashed; unsigned p0_tx_count,p0_rx_count; int p0; };
+/* Isolate transport accounting; test_rtkit_policy.py exercises the real policy. */
+static bool policy_ok=true;
+static bool rtkit_p0_allow(struct rtkit_dev *r,const struct rtkit_message *m) {
+ (void)r;(void)m;return policy_ok;
+}
+static void rtkit_p0_observe(int *p,unsigned char ep,u64 v) {(void)p;(void)ep;(void)v;}
 #define ANS1_P0 1
 #define RTKIT_AKF_MSG_EP 0xff00000000000000ULL
 #define RTKIT_AKF_MSG_MSG 0x00ffffffffffffffULL
@@ -50,6 +56,8 @@ int main(void) {
  r=(struct rtkit_dev){0};available=false;reads=ticks=0;
  assert(!rtkit_akf_recv_timeout(&r,&m,5));
  assert(!r.p0_rx_count && !r.crashed && reads<=5 && ticks<=6);
+ r=(struct rtkit_dev){0};policy_ok=false;sends=0;
+ assert(!rtkit_akf_send(&r,&m) && r.crashed && !sends && !r.p0_tx_count);
  puts("P0 TX/RX cumulative bounds, timed RX sharing and first-send-failure latch passed");
 }
 '''
