@@ -1485,7 +1485,7 @@ index fd6773a..4ce423d 100644
                  exc_guard = GUARD_SKIP;
                  if (request.mrequest.size != 0) {
 diff --git a/src/usb_dwc2.c b/src/usb_dwc2.c
-index 9220d62..1224e3c 100644
+index 9220d62..f3d1851 100644
 --- a/src/usb_dwc2.c
 +++ b/src/usb_dwc2.c
 @@ -820,27 +820,32 @@ static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_pac
@@ -1636,7 +1636,19 @@ index 9220d62..1224e3c 100644
                  usb_dwc2_ep0_handle_xfer_not_ready(dev);
                  // hexdump(dev->endpoints[USB_LEP_CTRL_OUT].xfer_buffer, 0x20);
                  // usb_dwc2_ep_set_stall(dev, 0, 1);
-@@ -1259,6 +1286,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+@@ -1229,7 +1256,10 @@ static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
+     if (!ep) { // EP0
+         // usb_debug_printf("usb_dwc2_ep_hw_recv with EP0out now:  state=%s\n",
+         // ep0_state_names[dev->ep0_state]);
+-        if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV)
++        /* A control read ends with host OUT ZLP. It needs CNAK just like
++         * an OUT data stage; EPENA alone can leave that status token NAKed. */
++        if (dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV ||
++            dev->ep0_state == USB_DWC2_EP0_STATE_DATA_RECV_STATUS)
+             set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP | DWC2_DXEPCTL_ClearNAK);
+         else
+             set32(dev->regs + DWC2_DOEPCTL(pep), DWC2_DXEPCTLi_EnableEP);
+@@ -1259,6 +1289,14 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 pa
  
  static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)
  {

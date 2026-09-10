@@ -30,6 +30,9 @@ typedef uint8_t u8; typedef uint32_t u32;
 #define DWC2_DOEPINT(n) (20+(n))
 #define DWC2_DIEPINT(n) (30+(n))
 #define DWC2_DOEPCTL(n) (40+(n))
+#define DWC2_DOEPDMA(n) (50+(n))
+#define DWC2_DXEPCTLi_EnableEP (1U<<31)
+#define DWC2_DXEPCTL_ClearNAK (1U<<26)
 #define DWC2_DOEPINT_XFER_COMPL BIT(0)
 #define DWC2_DOEPINT_SETUP BIT(3)
 #define DWC2_DOEPINT_STUP_PKT_RCVD BIT(15)
@@ -58,6 +61,9 @@ static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d){assert(d->ep0_read_b
 static void dma_rmb(void){}
 static unsigned read32(unsigned a){if(a==10)return daint;if(a==20)return outint;if(a==30)return inint;return remaining;}
 static void write32(unsigned a,unsigned v){(void)a;(void)v;}
+static unsigned control_bits;
+static void set32(unsigned a,unsigned v){(void)a;control_bits=v;}
+static const u8 phyEndpoints[]={0,0x80};
 '''
 body = function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
 assert body
@@ -72,6 +78,7 @@ reset = function('static void usb_dwc2_handle_usbrst(dwc2_dev_t *dev)')
 # abort waits or reset-register side effects in the remainder of this function.
 body += 'static const u8 cdc_default_line_coding[]={0x80,0x25,0,0,0,0,8};\n'
 body += reset[:reset.index('    // usb_debug_printf("handle_usbrst:')] + '\n}\n'
+body += function('static void usb_dwc2_ep_hw_recv(dwc2_dev_t *dev, u8 ep, u32 hw_xfer_size, u32 packet_count)')
 main = r'''
 int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};d.endpoints[0].xfer_buffer=payload;
@@ -133,6 +140,12 @@ int main(void){
   assert(!d.pipe[p].ready);
   assert(!memcmp(d.pipe[p].cdc_line_coding,cdc_default_line_coding,7));
  }
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV_STATUS;
+ usb_dwc2_ep_hw_recv(&d,0,64,1);
+ assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_RECV;
+ usb_dwc2_ep_hw_recv(&d,0,7,1);
+ assert(control_bits==(DWC2_DXEPCTLi_EnableEP|DWC2_DXEPCTL_ClearNAK));
  return 0;
 }
 '''

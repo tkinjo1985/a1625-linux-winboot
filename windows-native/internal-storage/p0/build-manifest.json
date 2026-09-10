@@ -2,9 +2,9 @@
   "source_url": "https://github.com/HoolockLinux/m1n1.git",
   "source_revision": "d5a10ac52a6468484854419a6c5130f1d62073eb",
   "ans1_feature_origin": "8a8bc21922b21a909330d7dbec53e8a763e9fa34",
-  "patch_sha256": "c6b4587425bb01626e09d3ae6f5109091ae78704c83d0ded274a1a6991148b26",
+  "patch_sha256": "bace0c5851925c0dd26bd1593ae2f1c2f7bde807fdb42f80cf72d6fe86451948",
   "m1n1_bin_path": "third_party/HoolockLinux-m1n1-p0/build/m1n1.bin",
-  "m1n1_bin_sha256": "44d075032555ab93960da0c0b9b8fcd6d9c67d8aebc27ba075d3195be54c737c",
+  "m1n1_bin_sha256": "92e31a7fec8e626a74708c50dd3ff3eee5ee89dde0c8a3201b854f36d72f1e9e",
   "cargo_lock_sha256": "58dbc0049ee8065dd7992bbcdd45ec5e62608ec9bec996d2411802ad9ed408b1",
   "linker_wrapper_sha256": "d97bf90b885780a75b8900938dce182ae8a4cbfea044086cbc57869caa64ee93",
   "build_flags": [
