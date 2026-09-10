@@ -297,5 +297,67 @@ P_NOP data path but is not claimed to fix or validate the controller-wide EP0
 reproducible patch SHA-256 is
 `2548A6515311F0CFABC35AC2DCFE23A3564B2E030212CB59CF4FBC827BB1373E`. Symbol
 inspection of the final P0 `usb.o` found only the DWC2 pipe-1 proxy operations.
-The currently booted device still contains the older payload, so this change
-has not been exercised on hardware.
+At that point the device still contained the older payload; session p below is
+the first hardware exercise of this build.
+
+## Session p: fresh-boot result after the pipe-1 change
+
+Approved session `artifacts/p0-usb/session-20260910-p` ran one device-affecting
+stage at a time against the owned A1625. The Checkm8 stage verified CPID 7000,
+BDID 34, the configured ECID, `libusbK`, and the saved physical connection
+location, then completed with status `passed`. Its record SHA-256 is
+`1246379FC78C5B47E54C033E342EDF7A6F7B6864A597F3511FFA7C4C6300CF52`.
+
+The first Pongo call was rejected by the pre-transfer driver gate because the
+YOLO instance still reported `WINUSB`; it transferred no Pongo data and was not
+automatically retried. After the user changed that exact instance to
+`libusbK`, a new explicit approval was obtained. The one approved retry passed,
+and PongoOS 2.6.3 enumerated as 05ac:4141 with the same CPID, BDID, ECID and
+connection location. The Pongo record SHA-256 is
+`FDE8D496BB2EEAF2E7DFA47621921BCD6EDFB29992D063113B8FAAF6294C2388`.
+
+The payload stage verified the manifest, source revision, patch and binary,
+then RAM-booted the pipe-1 P0 build. Windows enumerated 1209:316D through
+`usbser` as COM6 with product `m1n1 uartproxy v1.6.0-137-gd5a10ac-dirty` on the
+same connection location. The payload SHA-256 was
+`A3ACCAB2E941F666B4B8863EB7FFA4F775FD3D920A972315792DB56C067A0DEC`; the
+payload-stage record SHA-256 is
+`186C0EDE9ACB7A05A1D5F92671BB66591DA8CBF60B86D22AE358A976001624AF`.
+
+Before any proxy request, the fresh enumeration was saved to
+`before-com.json`. One ETW-traced COM-open attempt was then made with a
+15-second host deadline. `Serial.open()` did not return, the exact child was
+stopped and confirmed stopped, and no retry occurred. UCX recorded the fresh
+boot's first CDC request as `GET_LINE_CODING` (`bmRequestType=0xA1`,
+`bRequest=0x21`, `wValue=0`, `wIndex=2`, `wLength=7`, URB
+`0xFFFFE209F9E86FA8`). Its completion arrived about 30 seconds after submission
+with status `0xC0010000`, transfer length zero. No `SET_LINE_CODING` request was
+issued. The ETL SHA-256 is
+`C9848216545F4C0AD0981EDE10A97C818F6338CBC0BD0CBC7AA82508A5D799DA`; the XML
+SHA-256 is
+`9083871099B58E017C35F1CFB1626B61CB056C963353821172073C0BB582D506`.
+The COM-session and analysis record SHA-256 values are respectively
+`3A8208D0E4D49F9D3F3FC46E16E3E8F6C9EF81AA6D630A56F1252E43E52E919C` and
+`9D0A57371E431A66B7149AC3BC48B7FDAA2C99E6BC14F8F43E4E61DE6C54867A`.
+
+This fresh-boot trace establishes that selecting pipe 1 did not resolve the
+EP0 control-IN failure. It does not establish whether the device failed to
+consume the SETUP packet, failed to arm EP0 IN, or armed DMA but failed to
+complete it; those alternatives remain hypotheses pending further
+instrumentation. `SET_LINE_CODING` handling therefore remains untested on
+hardware because Windows never advances to that request. P_NOP was not sent,
+so its pipe-1 data path also remains unvalidated on hardware.
+
+### Current boundary and next work
+
+Completed in session p: Checkm8, PongoOS RAM boot, P0 m1n1 RAM boot, exact
+post-stage identity/location checks, and one bounded traced COM-open attempt.
+Not completed: successful COM configuration, hardware `SET_LINE_CODING`, or a
+normal P_NOP response. ANS initialization, NAND read/write and persistent
+storage operations were not executed; their request counts remain zero.
+
+Do not reuse the failed COM trace directory or repeat the current boot's COM
+open. The next device session requires a reviewed EP0 diagnostic/fix, a new
+payload hash, a manual clean DFU entry and fresh approval. Keep the same
+identity, location and artifact gates. Stop after COM configuration and three
+validated P_NOP responses; do not proceed to ANS initialization or NAND access.
