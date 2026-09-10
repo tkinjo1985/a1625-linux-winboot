@@ -686,3 +686,30 @@ success. Do not issue P_NOP in this autonomous-disconnect trial. In every
 outcome stop before ANS initialization and all NAND access. The trial is not
 authorized until its exact commands, current target state and hashes are shown
 and the user gives a new approval.
+
+### Session s execution wrapper and pre-start state
+
+`Invoke-Ep0DiagnosticTrial.ps1` preserves one ETW session across arm, the one
+COM open, the autonomous disconnect/re-enumeration window and report. It polls
+PnP state without issuing extra USB requests, timestamps every phase, stops the
+COM child at 40 seconds if still blocked, performs the report at 50 seconds
+from arm, and writes hashes/session state in `finally`. Its SHA-256 is
+`D590601CA39B884591600CE1C18CB3EF5C9D9C0EB8477338E99C0B30EA8A8DA8`.
+The wrapper neither performs boot stages nor sends P_NOP/ANS/NAND requests.
+
+The pre-start PnP check on 2026-09-10 found 1209:316D `usbser` at the expected
+USB(4)/HS04 location: the device was still running the prior m1n1 boot. It was
+not DFU, and no boot-stage command was run. After a new manual clean DFU entry,
+the exact proposed commands, each gated on the preceding result, are:
+
+```powershell
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Checkm8 -OutputDirectory artifacts/p0-usb/session-s-ep0-autoreport
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Pongo -OutputDirectory artifacts/p0-usb/session-s-ep0-autoreport
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Payload -OutputDirectory artifacts/p0-usb/session-s-ep0-autoreport -ApprovedPayloadSha256 5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D
+& .\windows-native\internal-storage\p0\Collect-TransportInventory.ps1 -OutputPath artifacts/p0-usb/session-s-ep0-autoreport/before-com.json
+& .\windows-native\internal-storage\p0\Invoke-Ep0DiagnosticTrial.ps1 -IdentityPath artifacts/p0-usb/session-s-ep0-autoreport/before-com.json -OutputDirectory artifacts/p0-usb/session-s-ep0-autoreport/diagnostic -ApprovedPayloadSha256 5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D
+```
+
+These commands are not valid against the currently observed 1209:316D state;
+the Checkm8 gate requires one clean 05AC:1227 DFU device with CPID 7000, BDID
+34, configured ECID `000C14642E028026`, `libusbK`, and the reviewed location.
