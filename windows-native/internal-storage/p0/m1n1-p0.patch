@@ -1,11 +1,35 @@
 diff --git a/src/akf.c b/src/akf.c
-index 9a2cea9..61499ac 100644
+index 9a2cea9..fe82c84 100644
 --- a/src/akf.c
 +++ b/src/akf.c
-@@ -45,8 +45,30 @@ struct akf_dev {
+@@ -3,6 +3,7 @@
+ #include "adt.h"
+ #include "akf.h"
+ #include "akf_fw.h"
++#include "heapblock.h"
+ #include "malloc.h"
+ #include "string.h"
+ #include "utils.h"
+@@ -44,9 +45,46 @@ struct akf_dev {
+     uintptr_t cpu_base;
      int iop_node;
  };
- 
++static u64 p0_fw_phys, p0_fw_iova, p0_fw_size;
++static bool p0_fw_reserved;
++
++bool akf_p0_reserve_firmware(void)
++{
++    int node = adt_path_offset(adt, "/arm-io/ans");
++    if (p0_fw_reserved || node < 0 || !akf_p0_validate_ans())
++        return false;
++    int fw_node = adt_first_child_offset(adt, node);
++    if (fw_node <= 0 || !akf_fw_get_region(fw_node, &p0_fw_phys, &p0_fw_iova, &p0_fw_size) ||
++        !heapblock_p0_reserve_firmware(p0_fw_phys, p0_fw_size))
++        return false;
++    p0_fw_reserved = true;
++    return true;
++}
++
 +bool akf_p0_validate_ans(void)
 +{
 +    /* J42d RAM ADT inventory; this validates metadata without touching MMIO. */
@@ -23,7 +47,7 @@ index 9a2cea9..61499ac 100644
 +    }
 +    return true;
 +}
-+
+ 
  akf_dev_t *akf_init(const char *path)
  {
 +#ifdef ANS1_P0
@@ -33,7 +57,7 @@ index 9a2cea9..61499ac 100644
      int akf_path[8];
      int node = adt_path_offset_trace(adt, path, akf_path);
      if (node < 0) {
-@@ -71,6 +93,7 @@ akf_dev_t *akf_init(const char *path)
+@@ -71,6 +109,7 @@ akf_dev_t *akf_init(const char *path)
          akf->base = base + AKF_V2_OFF;
      } else {
          printf("akf: Unsupported compatible\n");
@@ -41,15 +65,30 @@ index 9a2cea9..61499ac 100644
          return NULL;
      }
  
-@@ -101,6 +124,7 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -86,7 +125,7 @@ akf_dev_t *akf_init(const char *path)
+ bool akf_map_preloaded_fw(akf_dev_t *akf)
+ {
+     int fw_node = adt_first_child_offset(adt, akf->iop_node);
+-    if (!fw_node) {
++    if (fw_node <= 0) {
+         printf("akf: IOP Firmware node not found\n");
+         return false;
+     }
+@@ -100,7 +139,13 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+ 
      if (!akf_fw_get_region(fw_node, &phys, &iova, &size))
          return false;
++#ifdef ANS1_P0
++    if (akf->cpu_base == 0x208040000 &&
++        (!p0_fw_reserved || phys != p0_fw_phys || iova != p0_fw_iova || size != p0_fw_size))
++        return false;
++#endif
  
 +    printf("ANS1-P0: firmware phys=0x%lx iova=0x%lx size=0x%lx\n", phys, iova, size);
      write32(akf->cpu_base + AKF_REMAP_IOVA_LO, iova & 0xffffffff);
      write32(akf->cpu_base + AKF_REMAP_IOVA_HI, iova >> 32);
      write32(akf->cpu_base + AKF_REMAP_PHYS_LO, phys & 0xffffffff);
-@@ -109,19 +133,27 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
+@@ -109,19 +154,27 @@ bool akf_map_preloaded_fw(akf_dev_t *akf)
      write32(akf->cpu_base + AKF_REMAP_SIZE_HI, size >> 32);
      /* 0 = BE, 1 = LE */
      write32(akf->cpu_base + AKF_ENDIANNESS, 1);
@@ -78,14 +117,15 @@ index 9a2cea9..61499ac 100644
  
  bool akf_cpu_running(akf_dev_t *akf)
 diff --git a/src/akf.h b/src/akf.h
-index 05338b9..5bd155b 100644
+index 05338b9..a870404 100644
 --- a/src/akf.h
 +++ b/src/akf.h
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,8 @@
  typedef struct akf_dev akf_dev_t;
  
  akf_dev_t *akf_init(const char *path);
 +bool akf_p0_validate_ans(void);
++bool akf_p0_reserve_firmware(void);
  void akf_free(akf_dev_t *akf);
  
  int akf_get_iop_node(akf_dev_t *akf);
@@ -162,7 +202,7 @@ index 182115d..f05fc8e 100644
 +    return akf_fw_get_region_old(fw_node, phys, iova, size);
  }
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..456c8e4 100644
+index 9f771d2..d527e98 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -399,7 +439,7 @@ index 9f771d2..456c8e4 100644
  
      if (!ans1_ready && !ans1_wait_for_tag(ans1_rtkit, ANS1_COMPLETION_TAG_READY))
          goto out_shutdown;
-@@ -409,36 +385,102 @@ bool ans1_init(void)
+@@ -409,36 +385,104 @@ bool ans1_init(void)
              goto out_shutdown;
      }
  
@@ -497,6 +537,8 @@ index 9f771d2..456c8e4 100644
 +        return NULL;
 +    /* Seal generic host entry points before allocating any experimental buffer. */
 +    ans1_p0_session = true;
++    if (chip_id != T7000 || board_id != 0x34 || !akf_p0_reserve_firmware())
++        return NULL;
 +    ans1_p0_read_buffer = memalign(SZ_4K, SZ_4K);
 +    return ans1_p0_read_buffer;
 +}
@@ -534,6 +576,78 @@ index f16250f..31cf576 100644
 +bool ans1_p0_session_locked(void);
 +bool ans1_p0_memread_allowed(u64 addr, u64 size);
 +void ans1_p0_abort(void);
+ 
+ #endif
+diff --git a/src/heapblock.c b/src/heapblock.c
+index 3a1d6ac..058d2ff 100644
+--- a/src/heapblock.c
++++ b/src/heapblock.c
+@@ -17,6 +17,7 @@
+ 
+ static void *heap_base;
+ static void *heap_limit;
++static uintptr_t p0_firmware_limit;
+ 
+ void heapblock_init(void)
+ {
+@@ -30,10 +31,33 @@ void heapblock_init(void)
+ 
+ void heapblock_set_limit(void *limit)
+ {
++    if (p0_firmware_limit && (!limit || (uintptr_t)limit > p0_firmware_limit))
++        limit = (void *)p0_firmware_limit;
+     heap_limit = limit;
+     printf("Heap limit: %p (%ld MiB)\n", limit, ((u8 *)limit - (u8 *)heap_base) >> 20);
+ }
+ 
++bool heapblock_p0_reserve_firmware(u64 phys, u64 size)
++{
++    /* Match memory.c's identity-mapped physical RAM extent (includes carveouts). */
++    u64 ram = cur_boot_args.phys_base & ~0xffffffffULL, ram_size = mem_size_actual;
++    u64 used = (u64)heap_base;
++    if (p0_firmware_limit || !size || !ram_size || ram > ~(u64)0 - ram_size ||
++        phys < ram || size > ram_size || phys - ram > ram_size - size ||
++        !used || used < cur_boot_args.top_of_kernel_data || used > phys ||
++        cur_boot_args.top_of_kernel_data < ram || (u64)_base < ram ||
++        (u64)_end > phys ||
++        (phys & 0xfff) || (size & 0xfff))
++        return false;
++    if (heap_limit && (u64)heap_limit < used)
++        return false;
++    p0_firmware_limit = heap_limit && (u64)heap_limit < phys ? (u64)heap_limit : phys;
++    heap_limit = (void *)p0_firmware_limit;
++    printf("ANS1-P0: RAM=0x%lx+0x%lx heap_used_end=0x%lx heap_limit=%p "
++           "firmware=0x%lx+0x%lx retained\n", ram, ram_size, used, heap_limit, phys, size);
++    return true;
++}
++
+ void *heapblock_alloc(size_t size)
+ {
+     return heapblock_alloc_aligned(size, 64);
+@@ -44,9 +68,13 @@ void *heapblock_alloc_aligned(size_t size, size_t align)
+     assert((align & (align - 1)) == 0);
+     assert(heap_base);
+ 
++    if ((uintptr_t)heap_base > ~(uintptr_t)0 - (align - 1))
++        panic("heapblock: alignment overflow\n");
++
+     uintptr_t block = (((uintptr_t)heap_base) + align - 1) & ~(align - 1);
+ 
+-    if (heap_limit && block + size > (uintptr_t)heap_limit)
++    if (size > ~(uintptr_t)0 - block ||
++        (heap_limit && (block > (uintptr_t)heap_limit || size > (uintptr_t)heap_limit - block)))
+         panic("heapblock: out of memory (%zu bytes at 0x%lx, limit %p)\n", size, block, heap_limit);
+ 
+     heap_base = (void *)(block + size);
+diff --git a/src/heapblock.h b/src/heapblock.h
+index 315d48a..7d885bd 100644
+--- a/src/heapblock.h
++++ b/src/heapblock.h
+@@ -10,5 +10,6 @@ void heapblock_init(void);
+ void *heapblock_alloc(size_t size);
+ void *heapblock_alloc_aligned(size_t size, size_t align);
+ void heapblock_set_limit(void *limit);
++bool heapblock_p0_reserve_firmware(u64 phys, u64 size);
  
  #endif
 diff --git a/src/pmgr.c b/src/pmgr.c

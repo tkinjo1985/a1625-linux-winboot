@@ -21,6 +21,9 @@ typedef uint64_t u64;
 static bool ans1_p0_session,ans1_attempted,ans1_dead;
 static void *ans1_p0_read_buffer;
 static unsigned allocations, shutdowns;
+#define T7000 0x7000
+static unsigned chip_id=T7000,board_id=0x34;
+static bool akf_p0_reserve_firmware(void) {return true;}
 static void *memalign(size_t a,size_t s) {assert(a==4096 && s==4096);allocations++;return (void *)0x1000;}
 static void ans1_shutdown(void) {shutdowns++;}
 '''

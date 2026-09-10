@@ -49,6 +49,8 @@ are resolved. Do not substitute a Boolean edit for completing the preflight.
   It imports the proxy directly, avoiding m1n1.setup hardware side effects.
   Buffer preparation seals generic proxy and raw-write entry points for the
   rest of the boot; see [session-lock.md](session-lock.md).
+  Firmware is reserved above a fixed heap ceiling before buffer allocation and
+  ANS power; see [memory-ownership.md](memory-ownership.md).
 
 ## Build and verification
 
@@ -64,7 +66,7 @@ patch hash, Cargo lock hash, linker-wrapper hash and m1n1.bin SHA-256.
 
 Run test_commands.py, test_unwind.py, test_rtkit_retention.py, test_rtkit_budget.py,
 test_rtkit_policy.py, test_firmware_region.py, test_session_lock.py, test_mmio_identity.py
-and test_pmgr_plan.py
+test_pmgr_plan.py and test_heap_reservation.py
 with Windows Python. They exercise
 actual source function bodies with mocked transports/allocators. They cover
 all 256 opcodes, invalid tag/length/LBA/flags/address, failure latching, bool
