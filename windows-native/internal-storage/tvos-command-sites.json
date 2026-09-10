@@ -1,0 +1,43 @@
+{
+  "kernel_sha256": "935841b4ef66f868ffc85a4c10604a3416e4de88ff0aa9c518e5a63eaef7fc68",
+  "scope": "Observed command-byte assignments near direct callers; not a command allowlist or complete control-flow proof",
+  "sites": {
+    "0xfffffff006d97c3c": [81],
+    "0xfffffff006d98084": [28],
+    "0xfffffff006d98864": [16, 17],
+    "0xfffffff006d98aa4": [19],
+    "0xfffffff006d98c44": [18],
+    "0xfffffff006d9a3c4": [129],
+    "0xfffffff006d9aaf4": [128],
+    "0xfffffff006d9b020": [128],
+    "0xfffffff006d9c268": [20],
+    "0xfffffff006d9cf00": null,
+    "0xfffffff006d9d194": [25],
+    "0xfffffff006d9dc38": [0],
+    "0xfffffff006d9dc90": [0],
+    "0xfffffff006d9df14": [26],
+    "0xfffffff006d9e02c": [128],
+    "0xfffffff006d9e160": [128],
+    "0xfffffff006d9e22c": [27],
+    "0xfffffff006d9e45c": [122],
+    "0xfffffff006d9e54c": [128],
+    "0xfffffff006d9e678": [129],
+    "0xfffffff006d9e834": [128],
+    "0xfffffff006d9efbc": [129],
+    "0xfffffff006d9f19c": [118, 121],
+    "0xfffffff006d9f3f0": [129],
+    "0xfffffff006d9fc58": [129],
+    "0xfffffff006da0be4": [22],
+    "0xfffffff006da0e48": [21],
+    "0xfffffff006da110c": [128],
+    "0xfffffff006da14b4": [129]
+  },
+  "notes": {
+    "null": "command source requires wider or caller-dependent data-flow analysis",
+    "0xfffffff006d9cf00": "generic wrapper copies caller-provided 128-byte command; includes diagnostic writes",
+    "0xfffffff006d98864": "ASPBlockStorage::asyncReadWrite selects 0x11 when virtual direction method returns 2, otherwise 0x10; verified WRITE/READ log names",
+    "0xfffffff006d9f19c": "selector zero chooses 0x79; one chooses 0x76; other selector branches away before send",
+    "0x80_and_0x81": "multiple sites share these opcodes; subcommand fields and semantics must be classified individually",
+    "failure_paths": "No claim that all 29 failure/cleanup paths are verified"
+  }
+}

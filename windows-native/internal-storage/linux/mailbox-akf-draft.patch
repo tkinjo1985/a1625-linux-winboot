@@ -1,0 +1,344 @@
+--- a/drivers/soc/apple/mailbox.c
++++ b/drivers/soc/apple/mailbox.c
+@@ -31,6 +31,7 @@
+ #include <linux/spinlock.h>
+ #include <linux/types.h>
+ #include "mailbox.h"
++#include "ans1_wire.h"
+ 
+ #define APPLE_ASC_MBOX_CONTROL_FULL BIT(16)
+ #define APPLE_ASC_MBOX_CONTROL_EMPTY BIT(17)
+@@ -81,6 +82,7 @@
+ #define APPLE_MBOX_TX_TIMEOUT 500
+ 
+ struct apple_mbox_hw {
++	bool akf_single_word;
+ 	unsigned int control_full;
+ 	unsigned int control_empty;
+ 
+@@ -105,12 +107,38 @@
+ 	unsigned long flags;
+ 	int ret;
+ 	u32 mbox_ctrl;
++	u64 akf_word = 0;
+ 	long t;
+ 
++	/* Validate before taking a lock or touching hardware. */
++	if (mbox->hw->akf_single_word &&
++	    !ans1_wire_encode(msg.msg1, msg.msg0, &akf_word))
++		return -EINVAL;
++
+ 	spin_lock_irqsave(&mbox->tx_lock, flags);
++	if (mbox->hw->akf_single_word && !READ_ONCE(mbox->active)) {
++		spin_unlock_irqrestore(&mbox->tx_lock, flags);
++		return -ESHUTDOWN;
++	}
++	if (mbox->hw->akf_single_word && READ_ONCE(mbox->akf_faulted)) {
++		spin_unlock_irqrestore(&mbox->tx_lock, flags);
++		return -EIO;
++	}
+ 	mbox_ctrl = readl_relaxed(mbox->regs + mbox->hw->a2i_control);
++	if (mbox->hw->akf_single_word && (mbox_ctrl & 0xc0000)) {
++		WRITE_ONCE(mbox->akf_faulted, true);
++		spin_unlock_irqrestore(&mbox->tx_lock, flags);
++		return -EIO;
++	}
+ 
+ 	while (mbox_ctrl & mbox->hw->control_full) {
++		/* AKF retries belong to the caller's absolute request deadline.
++		 * Never arm the unverified send-empty interrupt or spin for 500 ms.
++		 */
++		if (mbox->hw->akf_single_word) {
++			spin_unlock_irqrestore(&mbox->tx_lock, flags);
++			return -EAGAIN;
++		}
+ 		if (atomic) {
+ 			ret = readl_poll_timeout_atomic(
+ 				mbox->regs + mbox->hw->a2i_control, mbox_ctrl,
+@@ -153,9 +181,13 @@
+ 		mbox_ctrl = readl_relaxed(mbox->regs + mbox->hw->a2i_control);
+ 	}
+ 
+-	writeq_relaxed(msg.msg0, mbox->regs + mbox->hw->a2i_send0);
+-	writeq_relaxed(FIELD_PREP(APPLE_MBOX_MSG1_MSG, msg.msg1),
+-		       mbox->regs + mbox->hw->a2i_send1);
++	if (mbox->hw->akf_single_word) {
++		writeq_relaxed(akf_word, mbox->regs + mbox->hw->a2i_send0);
++	} else {
++		writeq_relaxed(msg.msg0, mbox->regs + mbox->hw->a2i_send0);
++		writeq_relaxed(FIELD_PREP(APPLE_MBOX_MSG1_MSG, msg.msg1),
++			       mbox->regs + mbox->hw->a2i_send1);
++	}
+ 
+ 	spin_unlock_irqrestore(&mbox->tx_lock, flags);
+ 
+@@ -188,16 +220,31 @@
+ 	int ret = 0;
+ 
+ 	u32 mbox_ctrl = readl_relaxed(mbox->regs + mbox->hw->i2a_control);
+-
+-	while (!(mbox_ctrl & mbox->hw->control_empty)) {
++	if (mbox->hw->akf_single_word && (mbox_ctrl & 0xc0000)) {
++		WRITE_ONCE(mbox->akf_faulted, true);
++		return -EIO;
++	}
++
++	/* Per-call budget only; AKF IRQ retrigger policy needs hardware validation. */
++	while (!(mbox_ctrl & mbox->hw->control_empty) &&
++	       (!mbox->hw->akf_single_word || ret < 64)) {
+ 		msg.msg0 = readq_relaxed(mbox->regs + mbox->hw->i2a_recv0);
+-		msg.msg1 = FIELD_GET(
+-			APPLE_MBOX_MSG1_MSG,
+-			readq_relaxed(mbox->regs + mbox->hw->i2a_recv1));
++		if (mbox->hw->akf_single_word) {
++			msg.msg1 = ans1_wire_endpoint(msg.msg0);
++			msg.msg0 = ans1_wire_data(msg.msg0);
++		} else {
++			msg.msg1 = FIELD_GET(
++				APPLE_MBOX_MSG1_MSG,
++				readq_relaxed(mbox->regs + mbox->hw->i2a_recv1));
++		}
+ 
+ 		mbox->rx(mbox, msg, mbox->cookie);
+ 		ret++;
+ 		mbox_ctrl = readl_relaxed(mbox->regs + mbox->hw->i2a_control);
++		if (mbox->hw->akf_single_word && (mbox_ctrl & 0xc0000)) {
++			WRITE_ONCE(mbox->akf_faulted, true);
++			return -EIO;
++		}
+ 	}
+ 
+ 	/*
+@@ -233,17 +280,36 @@
+ 	int ret;
+ 
+ 	spin_lock_irqsave(&mbox->rx_lock, flags);
+-	ret = apple_mbox_poll_locked(mbox);
++	if (mbox->hw->akf_single_word && !READ_ONCE(mbox->active))
++		ret = -ESHUTDOWN;
++	else if (mbox->hw->akf_single_word && READ_ONCE(mbox->akf_faulted))
++		ret = -EIO;
++	else
++		ret = apple_mbox_poll_locked(mbox);
+ 	spin_unlock_irqrestore(&mbox->rx_lock, flags);
+ 
+ 	return ret;
+ }
+ EXPORT_SYMBOL(apple_mbox_poll);
+ 
+-int apple_mbox_start(struct apple_mbox *mbox)
++static void apple_mbox_akf_poll_work(struct work_struct *work)
++{
++	struct apple_mbox *mbox = container_of(to_delayed_work(work),
++					     struct apple_mbox, akf_poll_work);
++
++	if (!READ_ONCE(mbox->active))
++		return;
++	apple_mbox_poll(mbox);
++	if (READ_ONCE(mbox->active) && !READ_ONCE(mbox->akf_faulted))
++		schedule_delayed_work(&mbox->akf_poll_work, msecs_to_jiffies(2));
++}
++
++static int apple_mbox_start_locked(struct apple_mbox *mbox)
+ {
+ 	int ret;
+ 
++	if (mbox->hw->akf_single_word && READ_ONCE(mbox->akf_faulted))
++		return -EIO;
+ 	if (mbox->active)
+ 		return 0;
+ 
+@@ -265,21 +331,74 @@
+ 			       mbox->regs + mbox->hw->irq_enable);
+ 	}
+ 
+-	enable_irq(mbox->irq_recv_not_empty);
+-	mbox->active = true;
++	if (mbox->hw->akf_single_word) {
++		u32 tx_status, rx_status;
++
++		tx_status = readl_relaxed(mbox->regs + mbox->hw->a2i_control);
++		rx_status = readl_relaxed(mbox->regs + mbox->hw->i2a_control);
++		if ((tx_status | rx_status) & 0xc0000) {
++			WRITE_ONCE(mbox->akf_faulted, true);
++			pm_runtime_mark_last_busy(mbox->dev);
++			pm_runtime_put_autosuspend(mbox->dev);
++			return -EIO;
++		}
++		writel_relaxed(tx_status | BIT(0), mbox->regs + mbox->hw->a2i_control);
++		writel_relaxed(rx_status | BIT(0), mbox->regs + mbox->hw->i2a_control);
++	}
++
++	if (mbox->hw->akf_single_word) {
++		WRITE_ONCE(mbox->active, true);
++		schedule_delayed_work(&mbox->akf_poll_work, 0);
++	} else {
++		enable_irq(mbox->irq_recv_not_empty);
++		mbox->active = true;
++	}
+ 	return 0;
+ }
++int apple_mbox_start(struct apple_mbox *mbox)
++{
++	int ret;
++
++	if (!mbox->hw->akf_single_word)
++		return apple_mbox_start_locked(mbox);
++	mutex_lock(&mbox->lifecycle_lock);
++	ret = apple_mbox_start_locked(mbox);
++	mutex_unlock(&mbox->lifecycle_lock);
++	return ret;
++}
+ EXPORT_SYMBOL(apple_mbox_start);
+ 
+-void apple_mbox_stop(struct apple_mbox *mbox)
++static void apple_mbox_stop_locked(struct apple_mbox *mbox)
+ {
+ 	if (!mbox->active)
+ 		return;
+ 
+-	mbox->active = false;
+-	disable_irq(mbox->irq_recv_not_empty);
++	WRITE_ONCE(mbox->active, false);
++	if (mbox->hw->akf_single_word) {
++		unsigned long flags;
++
++		cancel_delayed_work_sync(&mbox->akf_poll_work);
++		/* Drain in-flight users before releasing the runtime-PM reference.
++		 * Never hold RX and TX together: receive callbacks may send.
++		 */
++		spin_lock_irqsave(&mbox->rx_lock, flags);
++		spin_unlock_irqrestore(&mbox->rx_lock, flags);
++		spin_lock_irqsave(&mbox->tx_lock, flags);
++		spin_unlock_irqrestore(&mbox->tx_lock, flags);
++	} else
++		disable_irq(mbox->irq_recv_not_empty);
+ 	pm_runtime_mark_last_busy(mbox->dev);
+ 	pm_runtime_put_autosuspend(mbox->dev);
++}
++void apple_mbox_stop(struct apple_mbox *mbox)
++{
++	if (!mbox->hw->akf_single_word) {
++		apple_mbox_stop_locked(mbox);
++		return;
++	}
++	mutex_lock(&mbox->lifecycle_lock);
++	apple_mbox_stop_locked(mbox);
++	mutex_unlock(&mbox->lifecycle_lock);
+ }
+ EXPORT_SYMBOL(apple_mbox_stop);
+ 
+@@ -331,6 +450,11 @@
+ }
+ EXPORT_SYMBOL(apple_mbox_get_byname);
+ 
++static void apple_mbox_akf_cleanup(void *data)
++{
++	apple_mbox_stop(data);
++}
++
+ static int apple_mbox_probe(struct platform_device *pdev)
+ {
+ 	int ret;
+@@ -347,9 +471,30 @@
+ 	if (!mbox->hw)
+ 		return -EINVAL;
+ 
++	if (mbox->hw->akf_single_word) {
++		struct resource *res;
++
++		/* This draft has evidence only for the owned J42d/T7000 target. */
++		if (!of_machine_is_compatible("apple,j42d") ||
++		    !of_machine_is_compatible("apple,t7000"))
++			return -ENODEV;
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++		if (!res || res->end < res->start ||
++		    resource_size(res) < 0x40 || (res->start & 7))
++			return -EINVAL;
++	}
++
+ 	mbox->regs = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(mbox->regs))
+ 		return PTR_ERR(mbox->regs);
++
++	spin_lock_init(&mbox->rx_lock);
++	spin_lock_init(&mbox->tx_lock);
++	init_completion(&mbox->tx_empty);
++	mutex_init(&mbox->lifecycle_lock);
++	INIT_DELAYED_WORK(&mbox->akf_poll_work, apple_mbox_akf_poll_work);
++	if (mbox->hw->akf_single_word)
++		goto enable_runtime;
+ 
+ 	mbox->irq_recv_not_empty =
+ 		platform_get_irq_byname(pdev, "recv-not-empty");
+@@ -359,10 +504,6 @@
+ 	mbox->irq_send_empty = platform_get_irq_byname(pdev, "send-empty");
+ 	if (mbox->irq_send_empty < 0)
+ 		return -ENODEV;
+-
+-	spin_lock_init(&mbox->rx_lock);
+-	spin_lock_init(&mbox->tx_lock);
+-	init_completion(&mbox->tx_empty);
+ 
+ 	irqname = devm_kasprintf(dev, GFP_KERNEL, "%s-recv", dev_name(dev));
+ 	if (!irqname)
+@@ -384,10 +525,16 @@
+ 	if (ret)
+ 		return ret;
+ 
++enable_runtime:
+ 	ret = devm_pm_runtime_enable(dev);
+ 	if (ret)
+ 		return ret;
+ 
++	if (mbox->hw->akf_single_word) {
++		ret = devm_add_action_or_reset(dev, apple_mbox_akf_cleanup, mbox);
++		if (ret)
++			return ret;
++	}
+ 	platform_set_drvdata(pdev, mbox);
+ 	return 0;
+ }
+@@ -441,7 +588,21 @@
+ 	.irq_bit_send_empty = APPLE_M3_MBOX_IRQ_A2I_EMPTY,
+ };
+ 
++/* Resource starts at the AKF mailbox window (IOP base + 0x1000).
++ * No firmware mapping, CPU start, or guessed IRQ numbering is added here.
++ */
++static const struct apple_mbox_hw apple_mbox_t7000_akf_hw = {
++	.akf_single_word = true,
++	.control_full = BIT(16),
++	.control_empty = BIT(17),
++	.a2i_control = 0x08,
++	.a2i_send0 = 0x10,
++	.i2a_control = 0x20,
++	.i2a_recv0 = 0x38,
++};
++
+ static const struct of_device_id apple_mbox_of_match[] = {
++	{ .compatible = "apple,t7000-akf-mailbox", .data = &apple_mbox_t7000_akf_hw },
+ 	{ .compatible = "apple,asc-mailbox-v4", .data = &apple_mbox_asc_hw },
+ 	{ .compatible = "apple,t8015-asc-mailbox", .data = &apple_mbox_t8015_hw },
+ 	{ .compatible = "apple,m3-mailbox-v2", .data = &apple_mbox_m3_hw },
+--- a/drivers/soc/apple/mailbox.h
++++ b/drivers/soc/apple/mailbox.h
+@@ -10,6 +10,8 @@
+ 
+ #include <linux/device.h>
+ #include <linux/types.h>
++#include <linux/workqueue.h>
++#include <linux/mutex.h>
+ 
+ /* encodes a single 96bit message sent over the single channel */
+ struct apple_mbox_msg {
+@@ -22,6 +24,9 @@
+ 	void __iomem *regs;
+ 	const struct apple_mbox_hw *hw;
+ 	bool active;
++	bool akf_faulted;
++	struct delayed_work akf_poll_work;
++	struct mutex lifecycle_lock;
+ 
+ 	int irq_recv_not_empty;
+ 	int irq_send_empty;

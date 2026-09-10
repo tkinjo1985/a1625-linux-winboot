@@ -1,0 +1,38 @@
+[
+  {
+    "name": "mingw-w64-ucrt-x86_64-libplist",
+    "version": "2.7.0-4",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libplist-2.7.0-4-any.pkg.tar.zst",
+    "sha256": "665607c34dbf923ebb820d78b376db59de4d2d3874a45d70f24f51eb1d64f127"
+  },
+  {
+    "name": "mingw-w64-ucrt-x86_64-libimobiledevice-glue",
+    "version": "1.3.2-1",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libimobiledevice-glue-1.3.2-1-any.pkg.tar.zst",
+    "sha256": "d089c718ab846c5bd1f41fb2788a976fdbda13c9f09128a670eca578da0bc34f"
+  },
+  {
+    "name": "mingw-w64-ucrt-x86_64-termcap",
+    "version": "1.3.1-7",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-termcap-1.3.1-7-any.pkg.tar.zst",
+    "sha256": "17b78eb63e89458a6ae4d56aa1dc357e1decb2f845b29fded79bccdd628d9d41"
+  },
+  {
+    "name": "mingw-w64-ucrt-x86_64-readline",
+    "version": "8.3.003-1",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-readline-8.3.003-1-any.pkg.tar.zst",
+    "sha256": "de2423c2e10fcd88272a0ab2f833f6a082cfe613d4c17c2f548cc50a5d2190c4"
+  },
+  {
+    "name": "mingw-w64-ucrt-x86_64-libirecovery",
+    "version": "1.2.1-1",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libirecovery-1.2.1-1-any.pkg.tar.zst",
+    "sha256": "9b1af519db640f4bb9bb25cf947d1c18f413702ca1558e5df463df04ed8e12d7"
+  },
+  {
+    "name": "mingw-w64-ucrt-x86_64-libusbmuxd",
+    "version": "2.1.1-1",
+    "url": "https://mirror.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-libusbmuxd-2.1.1-1-any.pkg.tar.zst",
+    "sha256": "27c86acc00eda349947fa0fde05cfca805ab1aee6da4cc4e4a6486aedf054f1c"
+  }
+]

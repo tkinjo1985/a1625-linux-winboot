@@ -1,0 +1,8 @@
+/dts-v1/;
+/* Compile-only fixture, not a bootable board device tree. */
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	compatible = "apple,j42d", "apple,t7000";
+};
+/include/ "a1625-ans-draft.dtsi"

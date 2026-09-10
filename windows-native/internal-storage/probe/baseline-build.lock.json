@@ -1,0 +1,20 @@
+{
+  "kernel_repository": "https://github.com/HoolockLinux/linux",
+  "kernel_revision": "958481f87fee0949ff6a9a4af77f7eb6dac8a149",
+  "archived_and_live_kernel_build_id": "4776c5754ce5ac725ac272d841f0a7dee2c4156a",
+  "archived_kernel_sha256": "9242a522839afd5f8c058bbca739e42e6b372acac139cd05e6b756c913bf42f4",
+  "configuration_semantic_diff": [],
+  "module_execution": "One finit_module call; expected ECANCELED; one completion log; module absent",
+  "live_ans_status": "0x0f000200",
+  "live_debug_status": "0x00000200",
+  "storage_access": "None; two PMGR status reads only",
+  "sha256": {
+    "artifacts/ans-baseline-kernel/.config": "284e7e590f6a4b748a1292fe35ef1888bdef1aaa1460ca10597d7f05b4e62dd5",
+    "artifacts/ans-baseline-kernel/Module.symvers": "9e14414c3b53cdaae579c286ab628c384cd9746dabf78f3fd1cbb6c17bf72a4c",
+    "artifacts/ans-baseline-kernel/include/generated/autoconf.h": "deed2c1eb59a0bea5ab6d75f5fb80a69e45730b5d700ebfc53a7155c76f513a1",
+    "artifacts/ans-baseline-kernel/include/generated/utsrelease.h": "d13b1abac98f48e6804194f31244cf0279b793098ea057534a51327df2b41c4d",
+    "artifacts/ans-power-snapshot/a1625_ans_power_snapshot.ko": "caff5de56840395c7fbb291559369a950cb96c9edb65844fbaf2eaea9f0a8aea",
+    "artifacts/ans-power-snapshot/run_probe_once": "880e89876ed9b860964705ec4cbf2b73421fd57c967b4e1069cf5c26c86e98a1",
+    "windows-native/internal-storage/probe/a1625_ans_power_snapshot.c": "81eb6ebd9508f9e928665f6c8c681687a324b2e4defb23fa2983db33388de80c"
+  }
+}

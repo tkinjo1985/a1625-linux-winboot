@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "target": {
+    "product": "AppleTV5,3",
+    "board": "J42d"
+  },
+  "source_kind": "RAM Apple Device Tree; not live IORegistry or NAND evidence",
+  "ans": {
+    "path": "/arm-io/ans",
+    "compatible": "iop,s5l8960x",
+    "registers": [
+      {
+        "bus_address": "0x8040000",
+        "physical_address": "0x208040000",
+        "size": "0x2000"
+      },
+      {
+        "bus_address": "0x8060000",
+        "physical_address": "0x208060000",
+        "size": "0x1000"
+      },
+      {
+        "bus_address": "0xe020000",
+        "physical_address": "0x20e020000",
+        "size": "0x1000"
+      },
+      {
+        "bus_address": "0xf00000",
+        "physical_address": "0x200f00000",
+        "size": "0x100000"
+      }
+    ],
+    "properties": {
+      "interrupt-parent": [
+        "0x11"
+      ],
+      "interrupts": [
+        "0x25",
+        "0x24",
+        "0x27",
+        "0x26"
+      ],
+      "clock-gates": [
+        "0x16",
+        "0x35"
+      ],
+      "power-gates": [
+        "0x16"
+      ],
+      "clock-ids": [
+        "0x137",
+        "0x138"
+      ],
+      "iop-version": [
+        "0x1"
+      ],
+      "ps-reg-offset": [
+        "0x318"
+      ],
+      "sf-ps-reg-offset": [
+        "0x298"
+      ]
+    }
+  },
+  "nub": {
+    "path": "/arm-io/ans/iop-ans-nub",
+    "compatible": "iop-nub,rtbuddy"
+  },
+  "unverified": [
+    "Linux IRQ and power-domain mapping",
+    "RTBuddy live state and protocol",
+    "ASP endpoints and block commands",
+    "disk capacity and block size",
+    "GPT/APFS topology and reference sector hashes"
+  ]
+}

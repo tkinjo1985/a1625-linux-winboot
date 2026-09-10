@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "target": "AppleTV5,3/J42d/T7000",
+  "pmgr_gates": [
+    {
+      "id": "0x16",
+      "name": "ANS",
+      "physical_address": "0x20e020318",
+      "parent_ids": [
+        0,
+        0
+      ],
+      "pmgr_register_index": 0,
+      "offset_in_register": "0x20318"
+    },
+    {
+      "id": "0x35",
+      "name": "DEBUG",
+      "physical_address": "0x20e020118",
+      "parent_ids": [
+        0,
+        0
+      ],
+      "pmgr_register_index": 0,
+      "offset_in_register": "0x20118"
+    }
+  ],
+  "interrupt_parent": {
+    "path": "/arm-io/aic",
+    "physical_address": "0x20e100000",
+    "size": "0x100000",
+    "interrupt_numbers": [
+      37,
+      36,
+      39,
+      38
+    ]
+  },
+  "limitations": [
+    "IRQ trigger semantics and interrupt order roles are unverified",
+    "No live register read, power transition or mailbox transaction"
+  ]
+}

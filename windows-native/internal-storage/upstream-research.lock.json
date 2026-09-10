@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/HoolockLinux/m1n1",
+  "revision": "d5a10ac52a6468484854419a6c5130f1d62073eb",
+  "purpose": "Offline upstream research only; not an approved A1625 boot artifact",
+  "sha256": {
+    "src/akf_fw.c": "9b881cf75060a8064810117eda554dd7d4b6caf81ce014d643115420e532c992",
+    "src/akf_fw.h": "146c4ad5f2646fd6734ab6883f3c0a389950c6f023f0da111c12cd4673fdcade",
+    "src/akf.c": "5614b201db7039a69811b1dcca0c4342618ad4db6b9d47f153e2e084c762a619",
+    "src/akf.h": "9ed215c9f103bd057341877aafae17729e1de692ace1a7aedac0c75e4cdd52cd",
+    "src/ans1.c": "a5dcd759c9ef0c0f404f4834d6276ae6fd6964b72dd56701572ca72b0b6eb256",
+    "src/ans1.h": "220c92a25ce1a9834c0339754f428d2f75083b26bd7232ad85c02936624e7711",
+    "src/pmgr.c": "2dd6bcb7a3a980375f8cf05663827ac470e5091c2349586cde0fa5f702a3b546",
+    "src/rtkit.c": "1ed15bfaa3d62d2e3754c195db72462d8f7e71ce0408fb9f9fd0479396141727",
+    "src/rtkit.h": "0fda24a9e8951e23dbd20db07754d82a795d87c612de65e54f24933b8960ff18"
+  }
+}

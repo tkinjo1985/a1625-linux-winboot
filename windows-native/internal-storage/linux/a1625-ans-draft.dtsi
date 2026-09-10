@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
+/* A1625/J42d/T7000 only. Offline draft, not included by any boot target.
+ * Addresses verified from the saved owned-device ADT. This reservation does
+ * not restore overwritten firmware or establish DMA quiescence.
+ */
+/ {
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		ans_firmware: ans-firmware@87f600000 {
+			reg = <0x8 0x7f600000 0x0 0x00a00000>;
+			no-map;
+		};
+	};
+
+	/* Physical IOP base 0x208040000 + AKF v1 mailbox offset 0x1000.
+	 * The polling backend requires no interrupt properties.
+	 * Power-domain/lifecycle integration must precede enabling this node.
+	 */
+	ans_mailbox: mailbox@208041000 {
+		compatible = "apple,t7000-akf-mailbox";
+		reg = <0x2 0x08041000 0x0 0x40>;
+		#mbox-cells = <0>;
+		status = "disabled";
+	};
+};
