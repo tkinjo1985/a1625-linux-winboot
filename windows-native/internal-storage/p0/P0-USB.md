@@ -1370,3 +1370,11 @@ Even result A is only one passive enumeration result. COM configuration and
 P_NOP belong to a later, separately reviewed test. Every result stops before
 ANS initialization or NAND read/write. This hardware validation has not been
 run, fresh DFU readiness is not assumed, and new execution approval is required.
+
+The offline pre-execution record has now been materialized at
+`artifacts/p0-usb/session-w-ep0-stale-in/PREEXECUTION.md` with SHA-256
+`889F740F7414317E8B390CFAA93AA4D0B8D8604B48100469A66D4F80CC92F4BD`.
+It fixes the executable/script/manifest/patch/payload paths, sizes and hashes,
+records the three exact commands, and explicitly leaves DFU, live identity,
+location and execution approval unsatisfied. No stage JSON or location binding
+was fabricated during this preparation.
