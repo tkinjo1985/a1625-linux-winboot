@@ -47,7 +47,7 @@ index 9a2cea9..e172262 100644
  
  bool akf_cpu_running(akf_dev_t *akf)
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..1907ec6 100644
+index 9f771d2..10c8174 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -215,7 +215,7 @@ index 9f771d2..1907ec6 100644
  
      dma_rmb();
  
-@@ -353,34 +302,46 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
+@@ -353,34 +302,45 @@ bool ans1_read_main_storage(u64 lba, void *buffer)
  
  bool ans1_init(void)
  {
@@ -235,11 +235,10 @@ index 9f771d2..1907ec6 100644
          return false;
 +    }
 +    printf("ANS1-P0: target J42d/T7000 chip=0x%x board=0x%x\n", chip_id, board_id);
-+    if (pmgr_adt_power_enable("/arm-io/ans")) {
-+        ans1_dead = true;
-+        return false;
-+    }
++    /* Power enable can partially succeed. Retain the uncertain state on error. */
 +    ans1_powered = true;
++    if (pmgr_adt_power_enable("/arm-io/ans"))
++        goto out_shutdown;
  
      ans1_akf = akf_init("/arm-io/ans");
      if (!ans1_akf)
@@ -269,7 +268,7 @@ index 9f771d2..1907ec6 100644
  
      if (!ans1_ready && !ans1_wait_for_tag(ans1_rtkit, ANS1_COMPLETION_TAG_READY))
          goto out_shutdown;
-@@ -409,36 +370,79 @@ bool ans1_init(void)
+@@ -409,36 +369,79 @@ bool ans1_init(void)
              goto out_shutdown;
      }
  
@@ -343,17 +342,14 @@ index 9f771d2..1907ec6 100644
 +            ans1_powered = false;
 +    }
 +}
- 
--    pmgr_adt_power_disable("/arm-io/ans");
++
 +void ans1_shutdown(void)
 +{
 +    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
 +        ans1_unwind();
 +}
  
--    ans1_initialized = false;
--    ans1_ready = false;
--    printf("ANS1: shutdown done\n");
+-    pmgr_adt_power_disable("/arm-io/ans");
 +bool ans1_p0_identify_copy(void *buffer)
 +{
 +    if (!ans1_initialized || ans1_dead || !buffer)
@@ -361,7 +357,10 @@ index 9f771d2..1907ec6 100644
 +    memcpy(buffer, ans1_identify_result, ANS1_CMD_SIZE);
 +    return true;
 +}
-+
+ 
+-    ans1_initialized = false;
+-    ans1_ready = false;
+-    printf("ANS1: shutdown done\n");
 +bool ans1_p0_shutdown(void)
 +{
 +    ans1_shutdown();

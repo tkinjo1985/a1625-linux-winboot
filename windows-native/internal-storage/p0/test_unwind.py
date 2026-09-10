@@ -64,6 +64,12 @@ int main(void) {
    }
   }
  }
+ /* Partial power enable / AKF allocation failure: CPU state is unknown. */
+ ans1_akf=cmd=NULL; ans1_rtkit=NULL; ans1_powered=true;
+ switches=stops=rfree=cfree=afree=disables=0;
+ ans1_unwind();
+ assert(ans1_dead && ans1_powered);
+ assert(!switches && !stops && !rfree && !cfree && !afree && !disables);
  puts("P0 bool sleep and stop-readback retention/unwind tests passed");
 }
 '''
