@@ -70,6 +70,16 @@ location and expected product/VID/PID, with usbser/OK, but still lacks an MI suf
 No COM open or proxy packet was attempted in that session. The stage records hash
 the actual saved `Invoke-UsbBootStage.ps1`, helper, executable and payload inputs.
 
+USBHUB3 ETW Rundown (keyword 0x8000, two seconds, stopped afterward) supplied the
+live configuration descriptor without opening COM or reconnecting. The event was
+selected by its target VID/PID device-interface path; its 97 descriptor bytes are
+saved as `live-configuration.bin` with hashes in `descriptor-hashes.json`. It lists
+control/data interfaces 0/1 and 2/3, CDC unions 0→1 and 2→3, and endpoint sets
+81/02/83 and 84/05/86, matching this source. Hub connection information reports all
+six pipes open. Neither observation uniquely identifies the COM-to-pair binding.
+The ETL contains other devices' rundown metadata too; keep it local. This was a
+configuration snapshot, not a capture of the earlier SetCommState failure.
+
 `transport_probe.py` requires a reviewed identity bound to the new boot, then
 re-enumerates and compares it before open. Incomplete/ambiguous identity is a
 no-send failure. If Windows again exposes no explicit interface, descriptor /
