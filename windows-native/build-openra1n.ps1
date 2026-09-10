@@ -198,6 +198,88 @@ $sourceText = [regex]::Replace($sourceText, $argumentPattern, '$1' + $argumentTa
 if (-not $sourceText.Contains('confirm_a1625 = 1;') -or -not $sourceText.Contains('cpid = 0; /* Fail closed')) {
     throw 'Failed to verify the A1625/ECID safety-gate patch.'
 }
+$descriptorTransfer = 'int ret = libusb_control_transfer(handle->device, bm_request_type, b_request, w_value, w_index, p_data, (uint16_t)w_len, usb_timeout);'
+if (($sourceText.Split($descriptorTransfer).Count - 1) -ne 1) {
+    throw 'Expected exactly one synchronous libusb transfer call for diagnostics.'
+}
+$descriptorLog = @'
+
+	/* Metadata only: no serial contents, extra requests, retries or timing changes. */
+	if (bm_request_type == 0x80 && b_request == 6) {
+		LOG_INFO("DFU_DESCRIPTOR type=%u index=%u lang=0x%x requested=%u returned=%d timeout_ms=%u",
+			(unsigned)(w_value >> 8), (unsigned)(w_value & 0xff), (unsigned)w_index,
+			(unsigned)w_len, ret, (unsigned)usb_timeout);
+	}
+'@
+$sourceText = $sourceText.Replace($descriptorTransfer, $descriptorTransfer + $descriptorLog)
+$sourcePatches['Descriptor transfer metadata logging'] = $true
+$serialFunction = "static char *`r`nget_usb_serial_number(usb_handle_t *handle) {`r`n"
+if (($sourceText.Split($serialFunction).Count - 1) -ne 1) {
+    throw 'Expected exactly one DFU serial acquisition function.'
+}
+$settledDescriptorHelper = @'
+/* Retry only an identity descriptor on the already-open handle. This does not
+ * reopen USB, reset the device, or repeat an exploit stage. */
+static bool
+read_identity_descriptor_settled(const usb_handle_t *handle, uint16_t value,
+                                 uint16_t index, void *data, size_t length,
+                                 transfer_ret_t *transfer_ret) {
+	unsigned attempt;
+	for(attempt = 0; attempt < 3; attempt++) {
+		send_usb_control_request(handle, 0x80, 6, value, index, data, length, transfer_ret);
+		if(transfer_ret->ret == USB_TRANSFER_OK) {
+			return true;
+		}
+		if(attempt + 1 < 3) {
+			LOG_INFO("DFU identity descriptor settling retry %u/2", attempt + 1);
+			sleep_ms(250);
+		}
+	}
+	return false;
+}
+
+'@
+$sourceText = $sourceText.Replace($serialFunction, $settledDescriptorHelper + $serialFunction)
+$deviceDescriptorRead = 'send_usb_control_request(handle, 0x80, 6, 1U << 8U, 0, &device_descriptor, sizeof(device_descriptor), &transfer_ret)'
+$stringDescriptorRead = 'send_usb_control_request(handle, 0x80, 6, (3U << 8U) | device_descriptor.i_serial_number, 0x409, buf, sizeof(buf), &transfer_ret)'
+if (($sourceText.Split($deviceDescriptorRead).Count - 1) -ne 1 -or
+    ($sourceText.Split($stringDescriptorRead).Count - 1) -ne 1) {
+    throw 'Expected exactly one device and one serial identity descriptor read.'
+}
+$sourceText = $sourceText.Replace($deviceDescriptorRead,
+    'read_identity_descriptor_settled(handle, 1U << 8U, 0, &device_descriptor, sizeof(device_descriptor), &transfer_ret)')
+$sourceText = $sourceText.Replace($stringDescriptorRead,
+    'read_identity_descriptor_settled(handle, (3U << 8U) | device_descriptor.i_serial_number, 0x409, buf, sizeof(buf), &transfer_ret)')
+$sourcePatches['Bounded same-handle DFU identity descriptor settling'] = $true
+$waitCounters = "`tunsigned attempts = 0;`r`n`tint init_ret;"
+if (($sourceText.Split($waitCounters).Count - 1) -ne 1) {
+    throw 'Expected exactly one libusb wait-loop counter block.'
+}
+$sourceText = $sourceText.Replace($waitCounters,
+    "`tunsigned attempts = 0;`r`n`tunsigned rejected_identity_opens = 0;`r`n`tint init_ret;")
+$rejectedClose = @'
+			libusb_close(handle->device);
+			handle->device = NULL;
+		}
+
+		attempts++;
+'@ -replace "`n", "`r`n"
+if (($sourceText.Split($rejectedClose).Count - 1) -ne 1) {
+    throw 'Expected exactly one rejected DFU identity close path.'
+}
+$boundedRejectedClose = @'
+			libusb_close(handle->device);
+			handle->device = NULL;
+			if(++rejected_identity_opens >= 3) {
+				LOG_ERROR("DFU_IDENTITY_REOPEN_LIMIT: three opened handles rejected before any exploit stage");
+				return false;
+			}
+		}
+
+		attempts++;
+'@ -replace "`n", "`r`n"
+$sourceText = $sourceText.Replace($rejectedClose, $boundedRejectedClose)
+$sourcePatches['Bounded DFU identity handle reopen'] = $true
 Set-Content -LiteralPath $generatedSource -Value $sourceText -Encoding utf8NoBOM
 
 Copy-Item -LiteralPath $resolvedPongo -Destination (Join-Path $build 'payloads\Pongo.bin') -Force

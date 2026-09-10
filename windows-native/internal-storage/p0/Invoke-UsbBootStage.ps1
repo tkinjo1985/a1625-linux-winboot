@@ -25,7 +25,7 @@ $exe=[string](Resolve-Path artifacts/openra1n-win/openra1n.exe)
 $dll=[string](Resolve-Path artifacts/openra1n-win/libusb-1.0.dll)
 if((Get-FileHash $exe).Hash -ne $openManifest.ExecutableSha256 -or (Get-FileHash $dll).Hash -ne $openManifest.LibusbSha256){throw 'Host hash mismatch'}
 $arguments=@('--confirm-a1625','--expected-ecid',$cfg.expectedEcid)
-$pattern='TRIGGER_HANDOFF|Failed to read DFU USB serial string descriptor|check callback rejected it'
+$pattern='TRIGGER_HANDOFF|DFU_IDENTITY_REOPEN_LIMIT|Safety gate: refusing|Unrecognized DFU serial'
 $files=@($PSCommandPath,'windows-native/Restore-A1625RamEnvironment.ps1',$exe,$dll)
 if($Stage -eq 'Pongo'){$arguments=@('--upload-only')+$arguments;$pattern=$null}
 if($Stage -eq 'Payload'){

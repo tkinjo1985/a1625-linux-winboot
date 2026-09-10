@@ -106,6 +106,69 @@ Further diagnosis needs per-transfer status/length evidence, not another blind
 DFU repetition. No host executable, retry behavior or driver was changed for
 this inspection.
 
+Session `artifacts/p0-usb/session-20260910-g` used the diagnostic host build and
+stopped at the Checkm8 gate without an automatic retry. The exact failing
+transfer was the first 18-byte device descriptor request (type 1, index 0),
+which returned libusb `-7` after the temporary 500 ms descriptor timeout. Thus
+the generic serial-read message in this run did not describe a failed string
+descriptor transfer. The identity and connection-location gates passed before
+the open, but checkm8, Pongo, payload, COM configuration and P_NOP were not
+executed. This result neither exercises nor invalidates the CDC fixes. A new
+physical attempt requires a fresh session record and the existing explicit
+approval; do not reuse session g or retry automatically.
+
+After a manual return to clean DFU, approved session
+`artifacts/p0-usb/session-20260910-h` passed the initial device and string
+descriptor reads and the exact CPID/BDID/ECID checks. Checkm8 stages 1 and 2
+reported success. The following re-enumeration then timed out on its 18-byte
+device descriptor request after 500 ms, before `TRIGGER_HANDOFF`. The wrapper
+therefore marked Checkm8 failed and did not run Pongo, payload, COM or P_NOP.
+No automatic retry was made. Unlike session g's failure on the initial open,
+session h establishes a repeated post-stage-2 re-enumeration failure point;
+it still provides no CDC hardware evidence.
+
+The host build now retries only a failed identity descriptor transfer on the
+same already-open libusb handle: at most two retries, with 250 ms between
+attempts. It does not reopen or reset the device and cannot repeat a checkm8
+stage. The existing wrapper still stops on failure after those bounded attempts,
+so it does not enable blind exploit retries. CPID/BDID/ECID validation remains
+after complete device and serial descriptor acquisition. The native build with
+this change passes; hardware behavior is not yet tested.
+
+Approved session `artifacts/p0-usb/session-20260910-i` exercised all three
+same-handle attempts on its initial device descriptor read; each returned
+libusb `-7`. No exploit stage ran. This proves same-handle settling alone was
+insufficient for that occurrence. The host path now permits close/reopen only
+while identity acquisition is incomplete, capped at three opened handles. Each
+handle still has only the original attempt plus two settled descriptor retries.
+Exhaustion emits `DFU_IDENTITY_REOPEN_LIMIT` and stops before an exploit stage.
+The stage wrapper continues to stop immediately on target-identity rejection,
+the reopen limit or `TRIGGER_HANDOFF`; generic transient descriptor errors no
+longer preempt the bounded reopen path. The native build passes, but this second
+bounded behavior is not yet hardware-tested.
+
+Approved session `artifacts/p0-usb/session-20260910-j` exercised that reopen
+bound. All three opened handles exhausted all three same-handle device
+descriptor attempts: nine 18-byte reads, each returning libusb `-7` at 500 ms.
+The explicit `DFU_IDENTITY_REOPEN_LIMIT` stopped the process before any checkm8
+stage. Reopening is therefore not a sufficient recovery for the device state
+present in session j, and increasing these bounds is not justified. PnP
+presence alone does not establish a responsive DFU EP0. A manual physical
+return to DFU and a fresh read-only responsiveness check are required before
+another approved device-affecting session. Pongo, payload, COM, P_NOP and ANS
+requests in session j were zero.
+
+After a manual physical return to DFU, read-only probe
+`artifacts/p0-usb/dfu-readonly-20260910-k` performed exactly one standard
+control-IN request for the 18-byte device descriptor. It returned all 18 bytes
+within the 500 ms transfer window. The probe made no configuration change,
+interface claim, USB reset, control-OUT request or checkm8 call. This establishes
+that the fresh DFU EP0 was responsive before the next device-affecting attempt;
+it does not establish continued responsiveness across checkm8 re-enumeration.
+`Build-DfuDescriptorProbe.ps1` now rebuilds this minimal probe, rejects the
+forbidden mutating libusb tokens, and records source/executable/libusb hashes
+and the fixed operation count in a build manifest.
+
 `transport_probe.py` requires a reviewed identity bound to the new boot, then
 re-enumerates and compares it before open. Incomplete/ambiguous identity is a
 no-send failure. If Windows again exposes no explicit interface, descriptor /
