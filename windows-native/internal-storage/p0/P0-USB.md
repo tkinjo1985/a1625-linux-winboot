@@ -977,3 +977,131 @@ Session u is complete and stopped safely. A further test needs a separately
 reviewed plan, a new session directory and new explicit approval; it must not
 repeat the already failed product or post-failure index-4 read without a new
 source of evidence.
+
+## Post-Session u ETW boundary analysis and passive-enumeration preparation
+
+### New finding from the saved trace
+
+The `wLength=00FF` event is not a successful product response. Session u ETW
+starts at `17:19:56.2330391` (the XML renders a nonstandard `+08:59` offset),
+after the Payload stage had already returned and Windows had created the
+1209:316D instance. For the target UCX device `0x6A7687447FD8`, the trace has
+only three control-transfer events. The first is the `00FF` completion; no
+matching dispatch exists anywhere in the trace. Its IRP differs from the later
+tool request, and its zero transfer length and cancellation statuses contain no
+descriptor bytes. Its issuer and start time are therefore UNKNOWN. In
+particular, the reused URB pointer cannot connect it to the later request.
+
+| Time | Target / origin | Complete SETUP | Requested / actual | Status | Pairing basis and limit |
+| --- | --- | --- | --- | --- | --- |
+| `17:19:57.6814245` | target device `0x6A7687447FD8`, control pipe `0xFFFF958972FD4630`; issuer UNKNOWN | `80/06/0302/0409/00FF` | 255 / 0 | IRP `C0000120`, USBD `C0010000` | completion only; IRP `0xFFFF9589842D0010`, URB `0xFFFF958938F68458`; dispatch is outside the recording or missing, so start time and attribution are UNKNOWN |
+| `17:19:57.6844513` | same device/control pipe; Session u helper, correlated by phase time and exact requested SETUP | `80/06/0302/0409/0080` | 128 / pending | dispatch USBD `40000000` | IRP `0xFFFF95896BDD4A80`, URB `0xFFFF958938F68458`, buffer `0xFFFF95896DD07DCC`; dispatch alone does not prove device SETUP consumption |
+| `17:20:02.6489973` | same helper request | `80/06/0302/0409/0080` | 128 / 0 | IRP `C0000120`, USBD `C0010000` | exact IRP, URB, pipe, device, SETUP and buffer match the preceding dispatch; 4.965-second interval matches host child termination, so this is cancellation, not a device-returned timeout |
+
+The UCX rundown maps the common pipe handle to endpoint object
+`0x6A768D02BA88`; the control-transfer task and SETUP identify logical EP0, but
+the XML has no separate endpoint-address field. It retains buffer addresses,
+not payload data. There is no successful target completion in the recorded
+interval. Consequently the last successful target transfer is UNKNOWN, and
+the first recorded abnormal target event is the unmatched `00FF` completion,
+which precedes the first tool dispatch by about 3.027 ms. The first manual
+helper operation is not the first recorded target USB event.
+
+Session u cannot reconstruct connection, descriptor enumeration,
+SET_CONFIGURATION, interface binding, or the transition to ordinary proxy
+waiting: all occurred before ETW began. PnP state and the Payload wrapper's
+postcondition show that Windows created the expected instance, but are not
+substitutes for per-transfer success completions or verified raw descriptor
+contents.
+
+### Code review at the missing boundary
+
+The saved manifest still identifies source revision
+`d5a10ac52a6468484854419a6c5130f1d62073eb`, patch SHA-256
+`BD9734C382F1339FDE61EF70A52FB1A179F2063491B823895ABC70F299A66BAC`,
+and the `ANS1_P0` build flags. The current nested source diff is byte-for-byte
+represented by that saved patch, and the payload still hashes to
+`5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D`.
+There is no later source/build divergence to explain Session u.
+
+In the DWC2 implementation, standard index 2 selects `str_product`, sets the
+response length to `min(wLength, descriptor_len)`, enters `DATA_SEND`, copies
+the response to the control-IN DMA buffer, and programs EP0 IN. IN completion
+moves to the host-OUT status state; status completion rearms SETUP. CDC
+GET_LINE_CODING joins the same path at `DATA_SEND`, but selects a 7-byte
+buffer. Thus the two requests share later control-IN machinery, while the trace
+does not prove that either reached it.
+
+The built product text has 40 characters, so the actual USB string descriptor
+is 82 bytes, not 128 or 255. It requires two 64-byte-maximum EP0 packets and
+fits the per-endpoint 4096-byte DMA allocation. Both observed request lengths
+would be capped to 82 by the code. No length overflow or single-packet boundary
+fault is established here. The existing SET_CONFIGURATION path activates the
+CDC endpoints and returns a control status; `uartproxy` continues to call
+`iodev_handle_events` before `iodev_can_read`. No new blocking wait, lock or
+flush attributable to the P0 patch was found on that transition.
+
+The P0 patch does change common EP0 interrupt/state handling, so it remains a
+candidate, but the post-enumeration-only trace cannot identify a failing state
+transition. There is insufficient evidence for a targeted USB source fix and
+no USB device code was changed. This review deliberately does not infer that
+the product and CDC failures share a cause.
+
+### Minimal preparation and offline verification
+
+`Invoke-PassiveEnumerationTrace.ps1` is the only new host behavior. It checks
+the existing Checkm8/Pongo records and payload/patch hashes, starts the same
+full-keyword/full-level `Microsoft-Windows-USB-UCX` provider before spawning
+the existing Payload stage once, then records 35 seconds after that stage
+returns. A failed Payload stage stops without extending observation. The
+overall payload-child deadline is 150 seconds. It adds no descriptor, index 4,
+COM, proxy, reset, P_NOP, ANS or NAND request and makes no driver change.
+
+The wrapper SHA-256 is
+`2F060712F0DF54DE28D545E37461C55F49FE5DBCC90F0AA69ABEC15CE6B974FE`;
+the unchanged called boot wrapper is
+`C4D1E315BB3FD001878842149D1C86166BB82C665CAC029DCB64CE4B592B3B77`.
+Its static test SHA-256 is
+`E9D1123550F38DA1F28705EBEDADF6E48F99B0DC33F1C9BF362A11EA1DE0FA77`.
+PowerShell parsing passed. All 19 P0 offline tests passed; the startup-object
+test initially could not execute sandboxed `llvm-objdump`, then passed when
+rerun with the same inputs outside that sandbox. These tests prove ordering
+and prohibited-operation absence, not live provider coverage or device timing.
+
+### One future passive enumeration session (not executed)
+
+Use a new directory `artifacts/p0-usb/session-v-passive-enumeration`. After a
+manual fresh DFU confirmation, run the existing Checkm8 and Pongo stages one at
+a time. Only if both saved records pass, run the prepared wrapper:
+
+```powershell
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Checkm8 -OutputDirectory artifacts/p0-usb/session-v-passive-enumeration
+& .\windows-native\internal-storage\p0\Invoke-UsbBootStage.ps1 -Stage Pongo -OutputDirectory artifacts/p0-usb/session-v-passive-enumeration
+& .\windows-native\internal-storage\p0\Invoke-PassiveEnumerationTrace.ps1 -OutputDirectory artifacts/p0-usb/session-v-passive-enumeration -ApprovedPayloadSha256 5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D -ObservationSeconds 35
+```
+
+The third command starts ETW before the existing Payload stage performs its
+upload/`bootm` transition. Provider rundown plus device/endpoint/pipe handles,
+SETUP tuples, IRP/URB identifiers, ordered location and the saved phase ticks
+will correlate pre/post-enumeration traffic. Header `EventsLost` and
+`BuffersLost` detect reported ETW loss; an `etw-started-before-payload` phase
+proves host ordering, but neither mechanism proves that UCX emitted every
+hardware transaction. The Payload stage's PnP polling/property reads are
+captured inside the window and must be classified from traffic, not assumed
+traffic-free. There are no tool-originated control requests in this trial.
+
+Interpret the single session as follows:
+
+| Result | What it can distinguish | What remains unknown |
+| --- | --- | --- |
+| successful standard descriptor and configuration completions, followed by no abnormal automatic control | enumeration EP0 worked at those recorded moments; Session u failure is later or specific to its hub-IOCTL context | descriptor contents without captured data, device internal state, and why the explicit hub request hung |
+| first abnormal completion occurs on a specific enumeration SETUP with a matched dispatch | narrows the boundary to that recorded request and orders it before driver readiness | device-side checkpoint and exact controller phase |
+| descriptors succeed but SET_CONFIGURATION or a later class request is first abnormal | separates early descriptor handling from configuration/class transition | whether host, hub, driver or device caused the failure |
+| unmatched completion or trace loss remains at the boundary | preserves UNKNOWN and shows the continuous trace still lacks decisive pairing | no causal conclusion; do not repeat automatically |
+| no target UCX traffic despite a successful Payload record | provider/correlation plan is insufficient on this host | USB behavior itself; stop rather than add an active probe |
+
+Success or failure ends the session. Do not issue product/index-4 controls,
+open COM, run P_NOP, or proceed to ANS/NAND. If the trace has loss, lacks both
+ends of the decisive transfer, or cannot correlate the expected device and
+ordered location, record UNKNOWN and stop. This plan requires a new explicit
+hardware approval after review; no Session v operation has been performed.
