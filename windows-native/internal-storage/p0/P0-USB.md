@@ -769,3 +769,37 @@ same executable as the current PowerShell process instead of resolving
 `C79D5F751E46EF91918E5B1CC329DEB9B3A3FDDF325D004861A1735572EDE417`.
 The existing diagnostic output directory is not reusable;
 another diagnostic attempt requires a new output directory and new approval.
+
+### Session t diagnostic-u: pre-COM arm recovery failed
+
+The user approved one corrected `diagnostic-u` run against the still-present,
+previously unarmed payload. All saved identity, parent, ordered location and
+reader-artifact gates passed. ETW started, and the Arm reader issued its one
+allowed index-4 descriptor operation through the parent hub. It did not return
+within the five-second deadline, so the exact child was stopped and no retry
+occurred. Stdout is empty; stderr is only `descriptor` and is not a diagnostic
+value. No P0E2 record was recovered. In particular this is UNKNOWN, not trace
+`0x00`, and the ETW submission cannot establish device-side SETUP recognition.
+
+Because an internal arm might nevertheless have occurred, this payload boot
+must not be used for another arm or COM attempt. The orchestrator stopped before
+`arm-confirmed`; actual counts are descriptor arm request 1, COM open 0, report
+0, P_NOP/ANS/NAND 0. Its ETL/XML SHA-256 values are
+`602614AED8FAC23EF44352B84A539899072F1B22753C7E5ABE931D934333C3EA`
+and `7B151CF120532B7BD00FEE84A532C507637EFD4216B7791B319698076FCA25A7`;
+the Arm session JSON SHA-256 is
+`720BEE2D9E4EF433CEDDDE41C84E84C434561835478B93C2D83B58D7494B38D9`.
+
+PnP checked after the device-side 45-second window still showed the expected
+1209:316D instance, `usbser`, and USB(4)/HS04 location. That observation does
+not prove whether a brief autonomous disconnect/re-enumeration occurred. The
+ETW session had already stopped on arm failure and contains no evidence from
+that later window.
+
+This result invalidates the assumed pre-COM arm confirmation path on this host:
+the same hub index-4 operation that failed after COM in session r also fails
+before COM. Consequently the advertised post-re-enumeration report design
+cannot be used until a different, independently verified pre-COM arm mechanism
+exists. Repeating index 4, opening COM on this boot, or treating PnP presence as
+arm success is prohibited. No further hardware step is authorized by this
+result.
