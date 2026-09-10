@@ -474,6 +474,13 @@ instrumented functions and verifies the `0x3f` then `0x7f` sequence. The helper
 build passes GCC 16.1 with `-std=c11 -Wall -Wextra -Werror -municode`. No helper
 or diagnostic payload was run against the device.
 
+`test_ep0_trace_reader.py` additionally verifies the exact single descriptor
+control-IN, absence of COM write/reset/libusb/proxy operations, complete live
+identity/location/hash gates, five-second one-attempt bound, zero P_NOP/ANS/NAND
+counts and reader-manifest hashes. This is a host-side policy test only; it does
+not establish that the hub IOCTL can recover the descriptor after a live EP0
+failure.
+
 Review must resolve the diagnostic record, hub-IOCTL recovery assumptions and
 one-trial interpretation before a new approval is requested. The future trial
 retains the current identity, location, artifact and one-stage-at-a-time gates.
