@@ -1829,3 +1829,27 @@ The saved stop record is
 requires changing only the exact owned A1625 DFU instance to `libusbK` through
 the existing documented procedure, then confirming the resulting live DFU
 state. No global Apple USB driver replacement is permitted.
+
+### Session z Checkm8 pass and Pongo driver-gate stop
+
+After the user changed the exact DFU instance driver, the Checkm8 command was
+run once. Its saved result is `status=passed`, `identity_verified=true`,
+`libusbK`, and the established USB(4)/HS04 location. `Checkm8.json` SHA-256 is
+`28A0241E9E78CAD82E808942E2056C343F737095C98371438A561D4BFA61372C`;
+the location record is
+`A868892B6366ACD75B644C2736EDEEB8D124A3FC5A74CB62C700575A572EB6AB`.
+Its `exit_code=-1` is the existing successful handoff-stop representation and
+did not invalidate the stage's passed predicate.
+
+The Pongo command was then invoked once and stopped before uploader launch:
+the post-Checkm8 YOLO instance reported `WINUSB`, while the existing gate
+requires `libusbK`. No `Pongo.json` was created. The candidate payload and
+passive ETW wrapper were not run, and no COM, active control request, P_NOP,
+ANS or NAND operation followed. No driver was changed automatically and the
+command was not retried.
+
+The exact stop record is
+`artifacts/p0-usb/session-z-epena-xfrc/PONGO-DRIVER-GATE.md`. Session z may
+continue only if the same live YOLO A1625 instance at the saved location is
+changed to `libusbK`. If it leaves that state or location, the passed Checkm8
+record must not be reused.
