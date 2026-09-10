@@ -162,7 +162,7 @@ index 182115d..f05fc8e 100644
 +    return akf_fw_get_region_old(fw_node, phys, iova, size);
  }
 diff --git a/src/ans1.c b/src/ans1.c
-index 9f771d2..5a9ed67 100644
+index 9f771d2..456c8e4 100644
 --- a/src/ans1.c
 +++ b/src/ans1.c
 @@ -27,81 +27,6 @@
@@ -355,17 +355,17 @@ index 9f771d2..5a9ed67 100644
 +    if (chip_id != T7000 || board_id != 0x34) {
 +        printf("ANS1-P0: target rejected chip=0x%x board=0x%x\n", chip_id, board_id);
 +        ans1_dead = true;
-         return false;
++        return false;
 +    }
 +    printf("ANS1-P0: target J42d/T7000 chip=0x%x board=0x%x\n", chip_id, board_id);
 +    if (!akf_p0_validate_ans()) {
 +        printf("ANS1-P0: J42d ANS MMIO metadata mismatch; no power enable\n");
 +        ans1_dead = true;
-+        return false;
+         return false;
 +    }
 +    /* Power enable can partially succeed. Retain the uncertain state on error. */
 +    ans1_powered = true;
-+    if (pmgr_adt_power_enable("/arm-io/ans"))
++    if (pmgr_p0_ans_power_enable())
 +        goto out_shutdown;
  
      ans1_akf = akf_init("/arm-io/ans");
@@ -437,7 +437,7 @@ index 9f771d2..5a9ed67 100644
 +    ans1_initialized = false;
 +    ans1_ready = false;
 +    if (ans1_stop_attempted)
-+        return;
+         return;
 +    ans1_stop_attempted = true;
 +    bool slept = false;
 +    if (ans1_rtkit)
@@ -452,18 +452,12 @@ index 9f771d2..5a9ed67 100644
 +        ans1_cpu_clear = true;
 +    } else if (ans1_powered) {
 +        printf("ANS1-P0: no CPU readback; retain power\n");
-         return;
++        return;
 +    }
 +    /* CPU readback does not prove DMA quiescence. Retain every allocation,
 +     * firmware mapping and power state until a manual power cycle. */
 +    printf("ANS1-P0: CPU clear=%u DMA stop=UNPROVEN; retain all mappings/buffers; "
 +           "no chainload or warm reboot; manual power cycle required\n", ans1_cpu_clear);
-+}
-+
-+void ans1_shutdown(void)
-+{
-+    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
-+        ans1_unwind();
 +}
  
 -    // For some reason rtkit_quiesce() would cause crash when startup again
@@ -472,6 +466,13 @@ index 9f771d2..5a9ed67 100644
 -    free(cmd);
 -    free(ans1_akf);
 -    free(cmd);
++void ans1_shutdown(void)
++{
++    if (ans1_attempted && (ans1_akf || ans1_rtkit || cmd || ans1_powered))
++        ans1_unwind();
++}
+ 
+-    pmgr_adt_power_disable("/arm-io/ans");
 +bool ans1_p0_identify_copy(void *buffer)
 +{
 +    if (!ans1_initialized || ans1_dead || !buffer || buffer != ans1_p0_read_buffer)
@@ -480,17 +481,16 @@ index 9f771d2..5a9ed67 100644
 +    return true;
 +}
  
--    pmgr_adt_power_disable("/arm-io/ans");
+-    ans1_initialized = false;
+-    ans1_ready = false;
+-    printf("ANS1: shutdown done\n");
 +bool ans1_p0_shutdown(void)
 +{
 +    ans1_shutdown();
 +    /* Observation only: never interpreted as DMA-stop confirmation. */
 +    return ans1_cpu_clear;
 +}
- 
--    ans1_initialized = false;
--    ans1_ready = false;
--    printf("ANS1: shutdown done\n");
++
 +void *ans1_p0_prepare_buffer(void)
 +{
 +    if (ans1_p0_session || ans1_attempted)
@@ -536,6 +536,63 @@ index f16250f..31cf576 100644
 +void ans1_p0_abort(void);
  
  #endif
+diff --git a/src/pmgr.c b/src/pmgr.c
+index 4119f8f..93d8dc6 100644
+--- a/src/pmgr.c
++++ b/src/pmgr.c
+@@ -271,6 +271,40 @@ int pmgr_adt_power_enable(const char *path)
+     return ret;
+ }
+ 
++int pmgr_p0_ans_power_enable(void)
++{
++    static bool attempted;
++    static const u32 ids[] = {0x16, 0x35};
++    static const uintptr_t addresses[] = {0x20e020318, 0x20e020118};
++    if (attempted || !pmgr_initialized)
++        return -1;
++    attempted = true;
++    int node = adt_path_offset(adt, "/arm-io/ans");
++    if (node < 0)
++        return -1;
++    u32 bytes = 0;
++    const u32 *gates = adt_getprop(adt, node, "clock-gates", &bytes);
++    if (!gates || bytes != sizeof(ids))
++        return -1;
++    /* Validate the whole plan before the first MMIO write. No recursion. */
++    for (unsigned int i = 0; i < 2; i++) {
++        const struct pmgr_device *device;
++        u16 parents[2];
++        if (gates[i] != ids[i] || pmgr_find_device(ids[i], &device) ||
++            (device->flags & PMGR_FLAG_VIRTUAL))
++            return -1;
++        pmgr_adt_get_parents(device, parents);
++        if (parents[0] || parents[1] || pmgr_device_get_addr(0, device) != addresses[i])
++            return -1;
++    }
++    for (unsigned int i = 0; i < 2; i++) {
++        printf("ANS1-P0: PMGR id=0x%x addr=0x%lx target=0xf attempt=1\n", ids[i], addresses[i]);
++        if (pmgr_set_mode(addresses[i], PMGR_PS_ACTIVE))
++            return -1;
++    }
++    return 0;
++}
++
+ int pmgr_adt_power_disable(const char *path)
+ {
+     return pmgr_adt_devices_set_mode(path, PMGR_PS_PWRGATE, false);
+diff --git a/src/pmgr.h b/src/pmgr.h
+index ba2ca99..fc8ed87 100644
+--- a/src/pmgr.h
++++ b/src/pmgr.h
+@@ -20,6 +20,7 @@ int pmgr_power_enable(u32 id);
+ int pmgr_power_disable(u32 id);
+ 
+ int pmgr_adt_power_enable(const char *path);
++int pmgr_p0_ans_power_enable(void);
+ int pmgr_adt_power_disable(const char *path);
+ int pmgr_adt_power_enable_index(const char *path, u32 index);
+ int pmgr_adt_power_disable_index(const char *path, u32 index);
 diff --git a/src/proxy.c b/src/proxy.c
 index 17e992c..452c3a2 100644
 --- a/src/proxy.c
