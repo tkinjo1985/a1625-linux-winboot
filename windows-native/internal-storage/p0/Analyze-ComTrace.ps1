@@ -18,7 +18,11 @@ foreach($event in $trace.Events.Event){
         time=[string]$event.System.TimeCreated.SystemTime
         event_id=[int]$event.System.EventID
         opcode=[int]$event.System.Opcode
+        device=$outer['fid_UsbDevice']
+        pipe=$outer['fid_PipeHandle']
+        irp=$outer['fid_IRP_Ptr']
         urb=$outer['fid_URB_Ptr']
+        nt_status=$outer['fid_IRP_NtStatus']
         status=$fields['fid_URB_Hdr_Status']
         transfer_length=$fields['fid_URB_TransferBufferLength']
         bm_request_type=$fields['fid_URB_Setup_bmRequestType']
@@ -35,7 +39,13 @@ $cdc=@($events | Where-Object {
 })
 $requests=@()
 foreach($start in @($cdc | Where-Object opcode -eq 1)){
-    $completions=@($events | Where-Object {$_.urb -eq $start.urb -and $_.opcode -eq 2})
+    $completions=@($events | Where-Object {
+        $_.opcode -eq 2 -and $_.time -ge $start.time -and
+        $_.device -eq $start.device -and $_.pipe -eq $start.pipe -and
+        $_.irp -eq $start.irp -and $_.urb -eq $start.urb -and
+        $_.bm_request_type -eq $start.bm_request_type -and $_.request -eq $start.request -and
+        $_.value -eq $start.value -and $_.index -eq $start.index -and $_.length -eq $start.length
+    } | Select-Object -First 1)
     $requests+=[pscustomobject][ordered]@{
         setup=$start
         completion_count=$completions.Count

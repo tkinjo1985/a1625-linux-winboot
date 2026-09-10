@@ -1105,3 +1105,114 @@ open COM, run P_NOP, or proceed to ANS/NAND. If the trace has loss, lacks both
 ends of the decisive transfer, or cannot correlate the expected device and
 ordered location, record UNKNOWN and stop. This plan requires a new explicit
 hardware approval after review; no Session v operation has been performed.
+
+## Session v: continuous passive enumeration result
+
+### Execution and safety result
+
+The user confirmed a fresh DFU state and approved Session v. Checkm8 passed.
+The first Pongo invocation stopped at its pre-transfer driver gate because the
+exact YOLO instance had `WINUSB`, not `libusbK`; it made no Pongo transfer and
+was not retried automatically. After the user changed that exact instance and
+gave a new approval, the single Pongo retry passed. The passive wrapper then
+started ETW before launching the one Payload stage. The payload and 35-second
+passive observation both passed.
+
+The payload was the approved RAM-only artifact
+`5DAEF3135B69FF754C21F353996597CA9CD872A043A2D4BC9599D87B972C1F4D`.
+Saved identity and ordered USB(4)/HS04 location gates passed. ETW reports zero
+lost events and zero lost buffers. Counts are tool descriptor/index-4/COM/proxy/
+P_NOP/ANS/NAND requests all zero. No driver change was automated, and no
+operation followed passive observation.
+
+### Newly established transfer boundary
+
+The new trace changes the P0-USB boundary materially. The target m1n1 UCX
+device is `0x6A7680BFC3A8` on control pipe `0xFFFF958978BB80E0`. Windows-side
+successful completions exist for device/configuration/string descriptors,
+SET_CONFIGURATION, the first CDC GET_LINE_CODING, SET_CONTROL_LINE_STATE and
+SET_LINE_CODING. The next GET_LINE_CODING is the first abnormal target
+transfer. It completes after about 8.919 ms with NT status `0xC0000001`, USBD
+status `0xC0000004` (`USBD_STATUS_STALL_PID` in the saved WDK header), and zero
+bytes. Only after that stall do standard string requests begin waiting five
+seconds and ending as host cancellations.
+
+| Time | SETUP | Host completion | Interpretation |
+| --- | --- | --- | --- |
+| `17:43:58.6609693` | `80/06/0100/0000/0040` device descriptor | success, 18 bytes | earliest recorded target request; host success record, raw bytes not retained |
+| `17:43:58.6744077` | `80/06/0200/0000/00FF` configuration | success, 97 bytes | full advertised configuration returned according to host completion |
+| `17:43:58.6745551` | `80/06/0302/0409/00FF` product | success, 82 bytes | exact built product length; proves this standard product transfer completed during this enumeration, not its decoded contents independently |
+| `17:43:58.6917021` | `00/09/0001/0000/0000` SET_CONFIGURATION | success, 0 bytes | configuration transition completed on the host |
+| `17:43:58.6932388` | `A1/21/0000/0002/0007` GET_LINE_CODING | success, 7 bytes | first CDC GET completed before any manual COM open |
+| `17:43:58.6933018` | `21/22/0000/0002/0000` SET_CONTROL_LINE_STATE | success, 0 bytes | DTR value is zero; not a user COM-open success |
+| `17:43:58.6936263` | `21/20/0000/0002/0007` SET_LINE_CODING | success, 7 bytes | host reports the complete control-OUT operation succeeded; received line-coding contents are not in ETW |
+| `17:43:58.6937333` | `A1/21/0000/0002/0007` GET_LINE_CODING | `C0000001/C0000004`, 0 bytes | first abnormal target transfer; STALL follows SET_LINE_CODING by only about 5.2 microseconds |
+| `17:43:58.7102546` | `80/06/0300/0000/00FF` languages | after 5.001 s: `C0000120/C0010000`, 0 bytes | first later non-returning standard request, canceled by its host deadline |
+| through `17:44:33.7553055` | repeated languages/manufacturer/product string requests | each completed pair waits about 5 s and is canceled; final product dispatch is unmatched at trace stop | host-originated follow-up sequence; exact issuing component is not identified by UCX events |
+
+The last successful target transfer is SET_LINE_CODING. The first failed target
+transfer is the immediately following GET_LINE_CODING, not the later product
+descriptor. This does not show that SET_LINE_CODING data was semantically
+correct, but it does overturn the earlier session-specific assumption that the
+device never reaches a host-successful SET_LINE_CODING operation. It also shows
+that EP0 and the 82-byte product response work earlier in the same boot.
+
+Session u's unmatched `00FF` product completion is consistent with the later
+five-second follow-up sequence seen here, but Session u still lacks its own
+submission and issuer; Session v does not retroactively supply those missing
+fields. The follow-up requests occur while the existing Payload wrapper is
+performing its PnP postcondition checks. UCX does not identify whether the
+specific issuer is PnP, usbser, the hub stack, or a property-query side effect,
+so attribution remains UNKNOWN.
+
+### Code interpretation and remaining uncertainty
+
+The exact SET_LINE_CODING and second GET share interface index 2 (pipe 1). The
+source accepts both tuples. SET_LINE_CODING receives seven bytes on EP0 OUT,
+copies them into pipe 1 line coding, sends IN status, and only after status
+completion rearms the next SETUP. The second GET dispatch follows the prior
+host completion by roughly 5.2 microseconds. A device-side rearm/timing race at
+that transition is therefore the leading code hypothesis, and the subsequent
+standard-request hangs are consistent with EP0 remaining in a bad state.
+
+That is an inference, not a device checkpoint. ETW cannot show whether the
+status-completion interrupt ran, whether SETUP DMA was rearmed before the next
+packet, or which code/hardware path generated the STALL. Therefore no
+speculative device fix was made in this session. In particular, success of the
+first GET and SET does not prove the current interleaving logic correct for the
+5-microsecond transition.
+
+External primary-source review was kept separate: the Linux kernel's official
+[`drivers/usb/dwc2/gadget.c`](https://github.com/torvalds/linux/blob/master/drivers/usb/dwc2/gadget.c)
+uses controller-specific EP0 setup/control handling and, in descriptor-DMA
+mode, distinct setup and control descriptor chains. It supports treating setup
+reception as a controller-level timing concern, but it does not prove the
+required programming sequence for this Apple/T7000 m1n1 implementation.
+
+### Saved evidence and offline correction
+
+| Evidence | SHA-256 |
+| --- | --- |
+| ETL | `12E9B287D9735ADD0122E711BA16D9B9494213E539DA4549EAE216D8E7766268` |
+| XML | `D27F6DECC1DF41DDDDD019A3815D1EA6E1E4DC69251FFBAA821A654960EE557A` |
+| phases JSONL | `2220D38B8EAFC503447AA0A2923266E3FDD8F2BA3925922370BBDF2DF69281C3` |
+| Payload JSON | `C4FBCC5F79F76FDDEB17405B32C1BF2E022B2E54587B24526C4A4FFF7DEC30DC` |
+| exact CDC analysis JSON | `0731EAD24540EB938B9A3F12DD6049ACAD71F0FEB398E3AD27633E8AC25CD23A` |
+
+`Analyze-ComTrace.ps1` previously paired completions by reused URB pointer
+alone. It now requires time order plus exact device, pipe, IRP, URB and complete
+SETUP equality, and selects only the first exact completion. Its SHA-256 is
+`2D804E043705A3EA7EE4D19B6C219A4F4204F99C1E8D12B7E76E699BEFF09352`.
+A regression with one reused URB and two distinct CDC requests passes, as does
+PowerShell parsing. The regression SHA-256 is
+`642E0197E68D3E2655D4E240252C707ECB86C0F39E1545316121A0D77D134916`.
+All 20 P0 offline tests pass; the startup-object test required the same
+previously approved out-of-sandbox `llvm-objdump` execution. The resulting Session v analysis contains four CDC
+requests, each with exactly one correctly paired completion. This is a
+host-analysis correction only and made no USB/device change.
+
+Session v achieved its primary goal and is closed. Do not reuse this boot or
+repeat the passive test. The next work should isolate and review the rapid
+control-OUT-status to next-SETUP transition in the DWC2 source, with a failing
+software interleaving regression before any code change. Any later hardware
+validation needs a new artifact hash, exact plan, fresh boot and new approval.
