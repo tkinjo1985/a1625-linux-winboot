@@ -158,6 +158,18 @@ return to DFU and a fresh read-only responsiveness check are required before
 another approved device-affecting session. Pongo, payload, COM, P_NOP and ANS
 requests in session j were zero.
 
+Comparison with the preserved successful Checkm8 logs from sessions b and d
+shows that the reset/reopen sequence itself is not new: both earlier runs
+completed stages 1, 2 and 3 and reached `TRIGGER_HANDOFF`. The diagnostic build
+added synchronous log output after every successful device and string
+descriptor read, despite its earlier comment claiming no timing change. Since
+these reads occur between timing-sensitive checkm8 stages, the success-path
+logging is now removed. Descriptor metadata is emitted only for an error or
+short transfer; bounded failure retries and all target gates remain. This
+restores the prior success-path instruction/I/O behavior except for failure-only
+branches. Hardware retest requires a fresh manual DFU entry because session l
+left the current instance unresponsive after stage 2.
+
 After a manual physical return to DFU, read-only probe
 `artifacts/p0-usb/dfu-readonly-20260910-k` performed exactly one standard
 control-IN request for the 18-byte device descriptor. It returned all 18 bytes

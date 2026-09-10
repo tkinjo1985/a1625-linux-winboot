@@ -204,9 +204,9 @@ if (($sourceText.Split($descriptorTransfer).Count - 1) -ne 1) {
 }
 $descriptorLog = @'
 
-	/* Metadata only: no serial contents, extra requests, retries or timing changes. */
-	if (bm_request_type == 0x80 && b_request == 6) {
-		LOG_INFO("DFU_DESCRIPTOR type=%u index=%u lang=0x%x requested=%u returned=%d timeout_ms=%u",
+	/* Keep the successful timing path unchanged; emit metadata only on failure/short read. */
+	if (bm_request_type == 0x80 && b_request == 6 && ret != (int)w_len) {
+		LOG_INFO("DFU_DESCRIPTOR_FAILURE type=%u index=%u lang=0x%x requested=%u returned=%d timeout_ms=%u",
 			(unsigned)(w_value >> 8), (unsigned)(w_value & 0xff), (unsigned)w_index,
 			(unsigned)w_len, ret, (unsigned)usb_timeout);
 	}
@@ -271,7 +271,7 @@ $boundedRejectedClose = @'
 			libusb_close(handle->device);
 			handle->device = NULL;
 			if(++rejected_identity_opens >= 3) {
-				LOG_ERROR("DFU_IDENTITY_REOPEN_LIMIT: three opened handles rejected before any exploit stage");
+				LOG_ERROR("DFU_IDENTITY_REOPEN_LIMIT: three opened handles rejected before the next exploit stage");
 				return false;
 			}
 		}
