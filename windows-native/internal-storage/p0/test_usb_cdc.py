@@ -25,6 +25,11 @@ typedef uint8_t u8; typedef uint32_t u32;
 #define USB_REQUEST_CDC_GET_LINE_CODING 0x21
 #define USB_REQUEST_CDC_SET_LINE_CODING 0x20
 #define USB_REQUEST_CDC_SET_CTRL_LINE_STATE 0x22
+#define USB_REQUEST_TYPE_SHIFT 5
+#define USB_REQUEST_TYPE(t) ((t)<<USB_REQUEST_TYPE_SHIFT)
+#define USB_REQUEST_TYPE_STANDARD USB_REQUEST_TYPE(0)
+#define USB_REQUEST_TYPE_CLASS USB_REQUEST_TYPE(1)
+#define USB_REQUEST_TYPE_MASK USB_REQUEST_TYPE(3)
 #define USB_LEP_CTRL_OUT 0
 #define USB_LEP_CTRL_IN 1
 #define USB_LEP_CDC_BULK_OUT 2
@@ -42,6 +47,7 @@ typedef uint8_t u8; typedef uint32_t u32;
 #define USB_LEP_CDC_BULK_IN_2 6
 #define DWC2_DXEPCTLi_EnableEP (1U<<31)
 #define DWC2_DXEPCTL_ClearNAK (1U<<26)
+#define DWC2_DXEPCTL_Stall (1U<<21)
 #define DWC2_DOEPINT_XFER_COMPL BIT(0)
 #define DWC2_DOEPINT_SETUP BIT(3)
 #define DWC2_DOEPINT_STUP_PKT_RCVD BIT(15)
@@ -63,6 +69,7 @@ typedef struct {
  unsigned regs; enum ep0_state ep0_state;
  void *ep0_read_buffer; unsigned ep0_read_buffer_len;
  const void *ep0_buffer; unsigned ep0_buffer_len;
+ const union usb_setup_packet *setup_pkt;
  bool ep0_ignore_next_in_completion;
  struct {void *xfer_buffer;unsigned in_flight;} endpoints[2];
  struct {bool ready;u8 cdc_line_coding[7];} pipe[2];
@@ -72,9 +79,15 @@ static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
 static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
 static unsigned stalls,bulk,status_in_arms,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
 static unsigned control_bits,out_dma_addr,out_dma_size,out_control_bits;
+static unsigned in_stall_sets,out_stall_sets,in_stall_clears,out_stall_clears;
 static unsigned inject_in_completion;
 static bool in_ep_enabled;
-static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
+static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,u8 e,u8 s);
+static void usb_dwc2_ep0_handle_class(dwc2_dev_t*d,const union usb_setup_packet*s);
+/* OUT-order cases use class SETUPs. Keep the unrelated, dependency-heavy
+ * standard handler out of this extraction; historical class tests used this
+ * direct path before the production dispatcher was added. */
+static void usb_dwc2_ep0_handle_standard(dwc2_dev_t*d,const union usb_setup_packet*s){usb_dwc2_ep0_handle_class(d,s);}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
 static int usb_dwc2_start_status_phase(dwc2_dev_t*d,u8 e);
 static int usb_dwc2_start_setup_phase(dwc2_dev_t*d);
@@ -95,16 +108,18 @@ static void write32(unsigned a,unsigned v){
  if(a==50)out_dma_addr=v;if(a==0)out_dma_size=v;
  if(a==60){assert(published);dma_addr=v;}if(a==70){dma_size=v;if(v==(1U<<19))status_in_arms++;}
 }
-static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);}else if(a==40)out_control_bits=v;else control_bits=v;}
+static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);if(v&DWC2_DXEPCTL_Stall){in_stall_sets++;stalls++;}}else if(a==40){out_control_bits=v;if(v&DWC2_DXEPCTL_Stall){out_stall_sets++;stalls++;}}else control_bits=v;}
+static void clear32(unsigned a,unsigned v){if(a==80&&v&DWC2_DXEPCTL_Stall)in_stall_clears++;else if(a==40&&v&DWC2_DXEPCTL_Stall)out_stall_clears++;}
 static const u8 phyEndpoints[]={0,0x80};
 '''
-body = function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
+body = function('static void usb_dwc2_ep_set_stall(dwc2_dev_t *dev, u8 ep, u8 stall)')
+body += function('static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)') if 'static void usb_dwc2_ep0_handle_class(dwc2_dev_t *dev, const union usb_setup_packet *setup)\n{' in source else ''
 assert body
 body += function('static int usb_dwc2_start_setup_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_start_status_phase(dwc2_dev_t *dev, u8 ep)')
-body += '\nstatic void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d){usb_dwc2_ep0_handle_class(d,d->endpoints[0].xfer_buffer);}\n'
+body += function('static void usb_dwc2_ep0_handle_setup(dwc2_dev_t *dev)')
 body += function('static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)')
 body += function('static void usb_dwc2_ep0_handle_xfer_not_ready(dwc2_dev_t *dev)')
 ep = function('static void usb_dwc2_handle_interrupts_ep(dwc2_dev_t *dev)')
@@ -132,7 +147,40 @@ int main(void){
  assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0);
  outint=DWC2_DOEPINT_XFER_COMPL;
  usb_dwc2_handle_interrupts_ep(&d);
- assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0 && in_stall_sets==0);
+ return 0;
+#endif
+#ifdef OUT_ORDER_CASE
+ union usb_setup_packet order_setup={.raw={0xa1,0x21,0,2,7}};
+ d.endpoints[0].xfer_buffer=&order_setup;
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
+#if OUT_ORDER_CASE == 1
+ // SETUP notifications and OUT completion in one snapshot: decode once.
+ daint=BIT(16);outint=DWC2_DOEPINT_STUP_PKT_RCVD|DWC2_DOEPINT_SETUP|DWC2_DOEPINT_XFER_COMPL;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE && in_stall_sets==0);
+ assert(d.setup_pkt==&order_setup && in_stall_clears==1 && out_stall_clears==1);
+#elif OUT_ORDER_CASE == 2
+ // STUP alone, then OUT completion before SETUP: production helper stalls IN.
+ daint=BIT(16);outint=DWC2_DOEPINT_STUP_PKT_RCVD;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING);
+ outint=DWC2_DOEPINT_XFER_COMPL;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE && in_stall_sets==1 && out_stall_sets==0);
+ assert(in_control_bits==DWC2_DXEPCTL_Stall && d.setup_pkt==NULL);
+ assert(out_dma_size==(1U<<19|64) && out_control_bits==DWC2_DXEPCTLi_EnableEP);
+#elif OUT_ORDER_CASE == 3
+ // SETUP decoded first, then a separately visible OUT completion.
+ daint=BIT(16);outint=DWC2_DOEPINT_SETUP;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_DATA_SEND_DONE && d.setup_pkt==&order_setup);
+ outint=DWC2_DOEPINT_XFER_COMPL;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_HANDLE && in_stall_sets==1);
+#elif OUT_ORDER_CASE == 4
+ // STUP without SETUP remains pending; reset discards it without success.
+ daint=BIT(16);outint=DWC2_DOEPINT_STUP_PKT_RCVD;usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && d.setup_pkt==NULL);
+ usb_dwc2_handle_usbrst(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_IDLE && d.setup_pkt==NULL && in_stall_sets==0);
+#endif
  return 0;
 #endif
 #ifdef COMPLETION_CASE_C
@@ -432,6 +480,11 @@ def compile_out_split(name, text):
     subprocess.run([str(gcc),'-std=c11','-DOUT_SPLIT_CASE=1',str(c_path),'-o',str(exe_path)],check=True)
     return subprocess.run([str(exe_path)],capture_output=True,text=True)
 
+def compile_out_order(name, text, case):
+    c_path=out/f'{name}.c'; exe_path=out/f'{name}.exe'; c_path.write_text(text)
+    subprocess.run([str(gcc),'-std=c11',f'-DOUT_ORDER_CASE={case}',str(c_path),'-o',str(exe_path)],check=True)
+    return subprocess.run([str(exe_path)],capture_output=True,text=True)
+
 def require_pass(result, label):
     assert result.returncode == 0, f'{label}: unexpected failure: {result.stderr}'
 
@@ -466,6 +519,9 @@ require_pass(fixed_b, 'fixed case B')
 out_split = compile_out_split('cdc-current-out-split', fixed_c)
 require_known_failure(out_split, 'conditional STUP/XferCompl/SETUP split',
                       'd.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0')
+for order_case in range(1,5):
+    require_pass(compile_out_order(f'cdc-current-out-order-{order_case}', fixed_c, order_case),
+                 f'current OUT ordering case {order_case}')
 
 print('CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS')
 print('completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; '
@@ -474,3 +530,4 @@ print('candidate premise: current IN completion is accepted only after EPENA cle
 print('case C: Session-z W1C->EPENA=XFAIL(expected duplicate advancement); '
       'fixed snapshot->W1C/W1C->EPENA/after-EPENA=PASS; fixed A/B=PASS')
 print('conditional OUT split: STUP then XferCompl before SETUP=XFAIL(BAD STATUS; hardware ordering unproven)')
+print('production dispatcher/stall helper: same-snapshot, split-before-SETUP, post-SETUP completion, and STUP-reset cases PASS')

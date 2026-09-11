@@ -1,23 +1,19 @@
 # P0-USB: transport only
 
-Three different "latest" states must remain separate:
-
-- **Latest physical attempt: Session ad.** It stopped in the pre-m1n1 Checkm8
-  re-enumeration path. The normalized payload was not transferred and no m1n1
-  USB evaluation occurred. Session ac/ad are therefore `target payload not
-  executed / USB evaluation not reached`, not additions to result B and not a
-  new A/B/C/D USB outcome.
-- **Latest m1n1 USB measurement: Session ab.** Standard enumeration, the first
+- **Latest physical and m1n1 USB measurement: Session ae.** The normalized
+  state-gate payload transferred successfully. Standard enumeration, the first
   GET_LINE_CODING, DTR=0 and SET_LINE_CODING succeeded, then the second GET
-  stalled with zero bytes. SET-completion-to-GET-dispatch was 11.9 microseconds
-  and GET-to-STALL was 8.9064 ms. This is result B for the exact Session-ab
-  payload. Its empty BUILD_TAG and 32-byte product remain an uncontrolled
-  comparison variable.
-- **Prepared normalized artifact.** It retains the Session-ab state-gate USB
-  code, has a validated nonempty BUILD_TAG and 82-byte product descriptor, and
-  is frozen as payload
+  failed with NT `0xC0000001`, USBD `0xC0000004` and zero bytes. This is result
+  B for payload
   `C6F2EFB907B12EC95E22D03F5036A68F663186B36F98529D053D87241B34D9D9`.
-  It has not run on hardware and has no USB success/failure classification.
+  Its validated nonempty BUILD_TAG produced the expected versioned 82-byte
+  product descriptor, so build normalization alone did not cross the boundary.
+- **Previous comparison: Session ab.** It observed the same result B, but its
+  empty BUILD_TAG and 32-byte product were an uncontrolled variable. Session
+  ae removes that limitation without changing the state-gate USB algorithm.
+- **Latest pre-payload failures: Sessions ac/ad.** They remain classified as
+  `target payload not executed / USB evaluation not reached`; they are not USB
+  result B observations.
 
 The Session ac/ad 18-byte DFU descriptor timeouts and Session ab's m1n1
 GET_LINE_CODING STALL occur in different software/device stages and are not
@@ -2250,9 +2246,46 @@ host observations only. This removes Session ab's product-length comparison
 constraint and confirms that metadata normalization alone does not fix the
 second-GET boundary.
 
-The wrapper itself ended after `passive-observation-started` without its
-completion marker or final record update; `session.json` remains `starting`.
-No retry was made. The saved ETL was converted and analyzed offline, so Result
-B is retained while whole-wrapper success is not claimed. No active descriptor
-request, COM, P_NOP, ANS or NAND operation followed. Evidence and hashes are in
-the Session ae `RESULT.md`.
+The wrapper wrote `passive-observation-complete` after 35 seconds and finalized
+`session.json` as `passed`. An earlier read while it was still running briefly
+observed `starting`; the later on-disk record and phase log show this was an
+observation race, not a wrapper failure. No retry occurred. No active
+descriptor request, COM, P_NOP, ANS or NAND operation followed. Evidence and
+hashes are in the Session ae `RESULT.md`.
+
+## Post-Session ae: OUT split with production dispatcher and STALL helper
+
+The conditional `STUP_PKT_RCVD`, then isolated OUT XferCompl before SETUP
+counterexample was retained and connected to the production
+`usb_dwc2_ep0_handle_setup` dispatcher and `usb_dwc2_ep_set_stall` helper. The
+mock now verifies the logical CTRL-IN mapping and the
+`DWC2_DXEPCTL_Stall` write to mocked DIEPCTL0, not only a helper-call counter.
+Production interrupt snapshot, W1C, class dispatch and subsequent 64-byte OUT
+SETUP rearm paths execute in the extracted C.
+
+For the supplied split input, software enters `SETUP_PENDING` without decoding
+the buffer, then the isolated completion reaches `BAD STATUS with COMPL`, sets
+IN STALL and rearms SETUP receive in `SETUP_HANDLE`. Coalesced
+STUP+SETUP+XferCompl decodes the class GET once without STALL. SETUP followed
+by an isolated completion also stalls; STUP without SETUP remains pending until
+the modeled reset returns IDLE without inventing success. These are software
+results for mock-provided snapshots. T7000 buffer-DMA ordering and occurrence
+in Session ae remain unconfirmed.
+
+No device correction is proposed: suppressing every XferCompl in
+`SETUP_PENDING` has no established way to distinguish a SETUP-related event
+from a valid OUT completion and could only replace STALL with an indefinite
+wait. The one missing fact is applicable STUP/SETUP/XferCompl coalescing and
+ordering semantics for the active controller mode.
+
+The finalized Session ae files also correct the earlier wrapper assessment:
+`passive-observation-complete` was written 35.014 seconds after start and
+`session.json` is `passed`. The intermediate `starting` read raced normal
+finalization; no host wrapper defect or host patch is retained.
+
+The original review ZIP remains unchanged. Updated review packet
+`artifacts/p0-usb/ep0-review-package-20260911-v2.zip` is 197252 bytes, SHA-256
+`991833821995574767213E8E2DDA685D6A9AA2D78449B0CF9D58F94E1BCB5DD9`.
+Its 41 listed files rehashed without mismatch after separate extraction, and
+the package-local production-source extraction test passed. No hardware
+operation was performed for this review.
