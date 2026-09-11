@@ -2137,3 +2137,18 @@ No retry was made. Pongo, normalized payload, passive ETW, COM, P_NOP, ANS and
 NAND were not run. Thus Session ac adds no normalized-build USB evidence. Its
 record is `artifacts/p0-usb/session-ac-normalized-state-gate/RESULT.md`; another
 attempt requires a fresh DFU state and new instruction.
+
+### Session ad: repeated Checkm8 re-enumeration stop
+
+After a new fresh DFU report and explicit retry instruction, Checkm8 was run
+once in a new Session-ad directory. The owned A1625, `libusbK`, CPID 7000 /
+BDID 34 and USB(4)/HS04 gates passed; stages 1 and 2 completed. The following
+18-byte device-descriptor requests again returned libusb `-7` at the 500 ms
+timeout, and bounded settling/reopen stopped at `DFU_IDENTITY_REOPEN_LIMIT`.
+This is the same pre-handoff boundary as Session ac.
+
+`Checkm8.json` SHA-256 is
+`0C3F504B897D8A4B802F119A0EFCE4291650BB98858667C7F41DF97C7DC6D789`.
+No additional retry was made. Pongo, normalized payload, ETW, COM, P_NOP, ANS
+and NAND were not run, so Session ad adds no normalized-build USB evidence.
+The record is `artifacts/p0-usb/session-ad-normalized-state-gate/RESULT.md`.
