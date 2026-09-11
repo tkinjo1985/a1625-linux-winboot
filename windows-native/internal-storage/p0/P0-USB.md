@@ -1965,3 +1965,27 @@ boundary; the same STALL makes the candidate insufficient; a moved failure is
 compared with the formerly successful prefix; missing target traffic is
 UNKNOWN. Every result stops. The trial does not open COM, send P_NOP, initialize
 ANS or access NAND, and it has not been authorized or executed here.
+
+### Session aa: Checkm8 re-enumeration stop
+
+The user subsequently reported a fresh DFU entry and approved the physical
+trial. The new Session-aa Checkm8 command was run once. The wrapper verified
+the owned A1625, `libusbK`, and the established USB(4)/HS04 location. The tool
+read CPID 7000 / BDID 34 identity and completed Checkm8 stages 1 and 2.
+
+During the following DFU re-enumeration, the 18-byte device-descriptor request
+returned libusb `-7` at the 500 ms timeout. The executable used its existing
+bounded identity-settling attempts and stopped at
+`DFU_IDENTITY_REOPEN_LIMIT`; it did not reach the next exploit/handoff stage.
+`Checkm8.json` records `status=failed`, `identity_verified=true`, expected
+driver/location and exit code 1. Its SHA-256 is
+`62EC6F9684F7E69FF0955073A80176547414367500287EA5A90545DB51A67B0F`;
+`location.json` is
+`A868892B6366ACD75B644C2736EDEEB8D124A3FC5A74CB62C700575A572EB6AB`.
+
+The command was not retried. Pongo, the state-gate payload, passive ETW, COM
+open, P_NOP, ANS and NAND were not executed. Session aa therefore adds no EP0
+candidate evidence. The complete stop record is
+`artifacts/p0-usb/session-aa-ep0-in-state-gate/RESULT.md`; a future physical
+attempt requires a fresh DFU state and new instruction rather than reuse of
+this failed stage.
