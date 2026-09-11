@@ -1,17 +1,19 @@
 # P0-USB: transport only
 
-The current measured boundary is Session z. With the EPENA/XFRC candidate
+The current measured boundary is Session ab. With the EP0 IN state-gate
 payload, standard enumeration, the first GET_LINE_CODING, DTR=0 and
 SET_LINE_CODING all completed successfully on the Windows host, but the
 immediately following GET_LINE_CODING still stalled with zero bytes. Its
-preceding SET-completion-to-GET-dispatch interval was 9.4 microseconds and the
-GET-dispatch-to-STALL-completion interval was 8.9110 milliseconds. This is
+preceding SET-completion-to-GET-dispatch interval was 11.9 microseconds and the
+GET-dispatch-to-STALL-completion interval was 8.9064 milliseconds. This is
 decision result B: the software fix is insufficient for the physical boundary,
 not proof that its modeled race is impossible. Neither host interval exposes
 the device's internal interrupt order. COM open and P_NOP remain unverified,
 and ANS initialization/NAND access remain unexecuted. HostReadOnlyExperimental
-and RamOnly defaults remain unchanged. Session y remains preserved below as
-the preceding stale-IN-candidate result.
+and RamOnly defaults remain unchanged. Session z remains preserved below as
+the preceding EPENA/XFRC result. Session ab also had an empty build tag and a
+32-byte rather than 82-byte product descriptor, so it is not a strict
+single-variable physical comparison with Session z.
 
 Historically, the first recorded session stopped at Windows `SetCommState`
 error 31 before the first proxy packet and had no USB capture. That historical
@@ -2007,3 +2009,44 @@ The exact stop record is
 `artifacts/p0-usb/session-ab-ep0-in-state-gate/PONGO-DRIVER-GATE.md`. Session ab
 may continue only if that same live YOLO instance at USB(4)/HS04 is changed to
 `libusbK`; otherwise the passed Checkm8 record must not be reused.
+
+### Session ab: state-gate candidate physical result B
+
+After the user changed the exact YOLO instance to `libusbK`, Pongo was run once
+and passed CPID 7000, PongoOS 2.6.3 and the established USB(4)/HS04 location
+gates. `Pongo.json` SHA-256 is
+`144EC7C8F0360D136753AF9B284BFB8293CC0C9E831C595DAC1FD863ADB5E96A`.
+The passive wrapper then loaded the approved RAM-only payload
+`4B497D2AD2DDCDF038EB4B0C0D2CFB202F28ACEDCF8761233E32E9ECD94EFD33`
+once and observed for 35 seconds. It issued no active descriptor request, COM
+open, proxy request, P_NOP, ANS or NAND operation.
+
+The CDC trace again produced result B. The first GET_LINE_CODING returned seven
+bytes, DTR=0 and SET_LINE_CODING succeeded, and the second GET_LINE_CODING
+failed with NT `0xC0000001`, USBD `0xC0000004`, and zero bytes. SET completion
+to GET dispatch was 11.9 microseconds; dispatch to failure was 8.9064 ms. These
+host intervals do not establish device interrupt or DMA order. The state gate
+therefore did not make this exact build cross the second-GET boundary. It does
+not prove Case C absent on hardware or settle its causation in Session z.
+
+There was also an unplanned build-variable difference. The product descriptor
+succeeded with 32 bytes and host identity `m1n1 uartproxy `, rather than the
+Session-z 82-byte versioned product. `build/build_tag.h` contains an empty
+`BUILD_TAG`; the build log had reported that `git` was unavailable to
+`version.sh`. The hashed payload result remains valid, but this prevents
+describing Session ab as a strict single-variable comparison with Session z.
+Post-failure string requests again ended in roughly five-second host
+cancellations, which do not prove device-side SETUP consumption.
+
+| Session-ab evidence | SHA-256 |
+| --- | --- |
+| `Payload.json` | `F79939453742C6A174957405D9B05D96B3470CBBB691B50493EC0D969496DB13` |
+| `timeline.etl` | `BEE7085CE427EBA12578E02D99D83340B956D9AFBDBE755FDCC296CE3CDB8813` |
+| `timeline.xml` | `C578EF6503E3D6B3423BD57BC60D8D64B048B5A57F407770AD8664DF3331D9D7` |
+| `phases.jsonl` | `9627306D3C6AD40B7F23773A585950586536DB4C48808F02BDF2532653CCFB4B` |
+| `cdc-analysis.json` | `9688FA76C5BAAE722893649669356F8E94C6211D85079E51A16AFC406DD6B001` |
+
+The complete record is
+`artifacts/p0-usb/session-ab-ep0-in-state-gate/RESULT.md`. No COM-setting
+success or P_NOP was established. ANS and NAND were not reached. No further
+physical operation or retry follows this result.
