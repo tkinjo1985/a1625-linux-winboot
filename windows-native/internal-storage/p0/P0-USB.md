@@ -1989,3 +1989,21 @@ candidate evidence. The complete stop record is
 `artifacts/p0-usb/session-aa-ep0-in-state-gate/RESULT.md`; a future physical
 attempt requires a fresh DFU state and new instruction rather than reuse of
 this failed stage.
+
+### Session ab: Checkm8 pass and Pongo driver-gate stop
+
+After another fresh DFU report and instruction, a new Session-ab Checkm8
+command was run once and passed with `identity_verified=true`, `libusbK`, and
+the established USB(4)/HS04 location. `Checkm8.json` SHA-256 is
+`528222B4C110D4C00AF04010FBF8CE62A9009715D09E48E0D1E10844F2174F11`.
+
+The Pongo command was then invoked once and stopped before uploader launch:
+the live YOLO instance reported `WINUSB`, while the existing gate requires
+`libusbK`. No `Pongo.json` was created. No driver was changed automatically
+and the command was not retried. The state-gate payload, passive ETW, COM open,
+P_NOP, ANS and NAND were not run.
+
+The exact stop record is
+`artifacts/p0-usb/session-ab-ep0-in-state-gate/PONGO-DRIVER-GATE.md`. Session ab
+may continue only if that same live YOLO instance at USB(4)/HS04 is changed to
+`libusbK`; otherwise the passed Checkm8 record must not be reused.
