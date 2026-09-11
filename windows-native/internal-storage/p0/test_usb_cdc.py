@@ -70,13 +70,13 @@ typedef struct {
 } dwc2_dev_t;
 static void usb_dwc2_ep_hw_send(dwc2_dev_t*,u8,u32,u32);
 static void usb_dwc2_ep_hw_recv(dwc2_dev_t*,u8,u32,u32);
-static unsigned stalls,bulk,statuses,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
+static unsigned stalls,bulk,status_in_arms,setups,remaining,daint,outint,inint,armed,dma_addr,dma_size,in_control_bits;
 static unsigned control_bits,out_dma_addr,out_dma_size,out_control_bits;
 static unsigned inject_in_completion;
 static bool in_ep_enabled;
 static void usb_dwc2_ep_set_stall(dwc2_dev_t*d,int e,int s){(void)d;(void)e;stalls+=s;}
 static void usb_dwc2_cdc_start_bulk_out_xfer(dwc2_dev_t*d,int e){(void)d;(void)e;bulk++;}
-static void usb_dwc2_start_status_phase(dwc2_dev_t*d,int e){statuses++;if(e==USB_LEP_CTRL_OUT)usb_dwc2_ep_hw_recv(d,e,64,1);}
+static int usb_dwc2_start_status_phase(dwc2_dev_t*d,u8 e);
 static int usb_dwc2_start_setup_phase(dwc2_dev_t*d);
 static void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d);
 static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t*d);
@@ -93,7 +93,7 @@ static void write32(unsigned a,unsigned v){
  if(a==20)outint&=~v; // endpoint interrupt registers are modeled as W1C latches
  if(a==30){inint&=~v;if(inject_in_completion==2){inint|=DWC2_DOEPINT_XFER_COMPL;in_ep_enabled=false;inject_in_completion=0;}}
  if(a==50)out_dma_addr=v;if(a==0)out_dma_size=v;
- if(a==60){assert(published);dma_addr=v;}if(a==70)dma_size=v;
+ if(a==60){assert(published);dma_addr=v;}if(a==70){dma_size=v;if(v==(1U<<19))status_in_arms++;}
 }
 static void set32(unsigned a,unsigned v){if(a==80){in_control_bits=v;in_ep_enabled=!!(v&DWC2_DXEPCTLi_EnableEP);}else if(a==40)out_control_bits=v;else control_bits=v;}
 static const u8 phyEndpoints[]={0,0x80};
@@ -103,6 +103,7 @@ assert body
 body += function('static int usb_dwc2_start_setup_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_ep0_start_data_send_phase(dwc2_dev_t *dev)')
 body += function('static int usb_dwc2_ep0_start_data_recv_phase(dwc2_dev_t *dev)')
+body += function('static int usb_dwc2_start_status_phase(dwc2_dev_t *dev, u8 ep)')
 body += '\nstatic void usb_dwc2_ep0_handle_setup(dwc2_dev_t*d){usb_dwc2_ep0_handle_class(d,d->endpoints[0].xfer_buffer);}\n'
 body += function('static void usb_dwc2_ep0_handle_xfer_done(dwc2_dev_t *dev)')
 body += function('static void usb_dwc2_ep0_handle_xfer_not_ready(dwc2_dev_t *dev)')
@@ -121,6 +122,19 @@ int main(void){
  dwc2_dev_t d={0};u8 payload[7]={0,0xc2,1,0,0,0,8};u8 in_payload[64]={0};
  d.endpoints[0].xfer_buffer=payload;d.endpoints[1].xfer_buffer=in_payload;
  union usb_setup_packet s={.raw={0x21,0x20,0,0,7}};
+#ifdef OUT_SPLIT_CASE
+ // Conditional counterexample only: if STUP_PKT_RCVD is followed by a
+ // separately visible XferCompl before SETUP, current code reaches the
+ // BAD STATUS branch while SETUP_PENDING. Hardware validity is unproven.
+ d.ep0_state=USB_DWC2_EP0_STATE_DATA_SEND_STATUS_DONE;
+ daint=BIT(16);outint=DWC2_DOEPINT_STUP_PKT_RCVD;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0);
+ outint=DWC2_DOEPINT_XFER_COMPL;
+ usb_dwc2_handle_interrupts_ep(&d);
+ assert(d.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0);
+ return 0;
+#endif
 #ifdef COMPLETION_CASE_C
  // A new GET is active while an older XferCompl is pending. Inject completion
  // of the new GET at one exact MMIO boundary selected by the build.
@@ -225,9 +239,9 @@ int main(void){
   assert(stalls==before+1 && d.pipe[0].cdc_line_coding[0]==0 && !d.ep0_read_buffer);
  }
  s.raw.bRequest=0x22;s.raw.wLength=0;s.raw.wValue=1;
- unsigned bulk_before=bulk,statuses_before=statuses;
+ unsigned bulk_before=bulk,statuses_before=status_in_arms;
  usb_dwc2_ep0_handle_class(&d,&s);usb_dwc2_ep0_handle_class(&d,&s);
- assert(bulk==bulk_before+1 && statuses==statuses_before+2 && d.pipe[0].ready);
+ assert(bulk==bulk_before+1 && status_in_arms==statuses_before+2 && d.pipe[0].ready);
  s.raw.wValue=0;usb_dwc2_ep0_handle_class(&d,&s);assert(!d.pipe[0].ready);
  // New SETUP interrupts an unfinished OUT; simultaneous old IN must not advance it.
  s.raw.bRequest=0x20;s.raw.wLength=7;s.raw.wValue=0;
@@ -392,7 +406,7 @@ for old, new in replacements:
     assert pre_fix_c.count(old) == 1, f'completion baseline drift: {old[:48]!r}'
     pre_fix_c = pre_fix_c.replace(old, new)
 
-gcc = Path.home() / 'scoop/apps/msys2/current/ucrt64/bin/gcc.exe'
+gcc = Path(os.environ.get('P0_GCC', Path.home() / 'scoop/apps/msys2/current/ucrt64/bin/gcc.exe'))
 os.environ['PATH'] = str(gcc.parent) + os.pathsep + os.environ['PATH']
 
 def compile_case(name, text, case_b=False):
@@ -412,6 +426,11 @@ def compile_case_c(name, text, boundary):
     subprocess.run([str(gcc), '-std=c11', f'-DCOMPLETION_CASE_C={boundary}',
                     str(c_path), '-o', str(exe_path)], check=True)
     return subprocess.run([str(exe_path)], capture_output=True, text=True)
+
+def compile_out_split(name, text):
+    c_path=out/f'{name}.c'; exe_path=out/f'{name}.exe'; c_path.write_text(text)
+    subprocess.run([str(gcc),'-std=c11','-DOUT_SPLIT_CASE=1',str(c_path),'-o',str(exe_path)],check=True)
+    return subprocess.run([str(exe_path)],capture_output=True,text=True)
 
 def require_pass(result, label):
     assert result.returncode == 0, f'{label}: unexpected failure: {result.stderr}'
@@ -444,6 +463,9 @@ fixed_a = compile_case('cdc-fixed-a', fixed_c)
 require_pass(fixed_a, 'fixed case A')
 fixed_b = compile_case('cdc-fixed-b', fixed_c, case_b=True)
 require_pass(fixed_b, 'fixed case B')
+out_split = compile_out_split('cdc-current-out-split', fixed_c)
+require_known_failure(out_split, 'conditional STUP/XferCompl/SETUP split',
+                      'd.ep0_state==USB_DWC2_EP0_STATE_SETUP_PENDING && stalls==0')
 
 print('CDC baseline: normal GET/SET/product/short-OUT/DTR/reset PASS')
 print('completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; '
@@ -451,3 +473,4 @@ print('completion matrix: pre-fix A=XFAIL(expected assertion), B=PASS; '
 print('candidate premise: current IN completion is accepted only after EPENA clears')
 print('case C: Session-z W1C->EPENA=XFAIL(expected duplicate advancement); '
       'fixed snapshot->W1C/W1C->EPENA/after-EPENA=PASS; fixed A/B=PASS')
+print('conditional OUT split: STUP then XferCompl before SETUP=XFAIL(BAD STATUS; hardware ordering unproven)')

@@ -1,19 +1,29 @@
 # P0-USB: transport only
 
-The current measured boundary is Session ab. With the EP0 IN state-gate
-payload, standard enumeration, the first GET_LINE_CODING, DTR=0 and
-SET_LINE_CODING all completed successfully on the Windows host, but the
-immediately following GET_LINE_CODING still stalled with zero bytes. Its
-preceding SET-completion-to-GET-dispatch interval was 11.9 microseconds and the
-GET-dispatch-to-STALL-completion interval was 8.9064 milliseconds. This is
-decision result B: the software fix is insufficient for the physical boundary,
-not proof that its modeled race is impossible. Neither host interval exposes
-the device's internal interrupt order. COM open and P_NOP remain unverified,
-and ANS initialization/NAND access remain unexecuted. HostReadOnlyExperimental
-and RamOnly defaults remain unchanged. Session z remains preserved below as
-the preceding EPENA/XFRC result. Session ab also had an empty build tag and a
-32-byte rather than 82-byte product descriptor, so it is not a strict
-single-variable physical comparison with Session z.
+Three different "latest" states must remain separate:
+
+- **Latest physical attempt: Session ad.** It stopped in the pre-m1n1 Checkm8
+  re-enumeration path. The normalized payload was not transferred and no m1n1
+  USB evaluation occurred. Session ac/ad are therefore `target payload not
+  executed / USB evaluation not reached`, not additions to result B and not a
+  new A/B/C/D USB outcome.
+- **Latest m1n1 USB measurement: Session ab.** Standard enumeration, the first
+  GET_LINE_CODING, DTR=0 and SET_LINE_CODING succeeded, then the second GET
+  stalled with zero bytes. SET-completion-to-GET-dispatch was 11.9 microseconds
+  and GET-to-STALL was 8.9064 ms. This is result B for the exact Session-ab
+  payload. Its empty BUILD_TAG and 32-byte product remain an uncontrolled
+  comparison variable.
+- **Prepared normalized artifact.** It retains the Session-ab state-gate USB
+  code, has a validated nonempty BUILD_TAG and 82-byte product descriptor, and
+  is frozen as payload
+  `C6F2EFB907B12EC95E22D03F5036A68F663186B36F98529D053D87241B34D9D9`.
+  It has not run on hardware and has no USB success/failure classification.
+
+The Session ac/ad 18-byte DFU descriptor timeouts and Session ab's m1n1
+GET_LINE_CODING STALL occur in different software/device stages and are not
+treated as one cause. Host intervals do not expose device interrupt order.
+COM open and P_NOP remain unverified; ANS initialization and NAND access remain
+unexecuted. HostReadOnlyExperimental and RamOnly defaults remain unchanged.
 
 Historically, the first recorded session stopped at Windows `SetCommState`
 error 31 before the first proxy packet and had no USB capture. That historical
@@ -2152,3 +2162,56 @@ This is the same pre-handoff boundary as Session ac.
 No additional retry was made. Pongo, normalized payload, ETW, COM, P_NOP, ANS
 and NAND were not run, so Session ad adds no normalized-build USB evidence.
 The record is `artifacts/p0-usb/session-ad-normalized-state-gate/RESULT.md`.
+
+## Post-Session ad: independent EP0 review result
+
+The normalized frozen source, manifest, patch, header, quality record and test
+were rehashed from local files without rebuilding. They match the saved
+normalized hashes. Current device source is byte-identical to the frozen
+Session-ab/normalized `usb_dwc2.c`; only the host test and review artifacts were
+extended. The normalized payload remains unexecuted.
+
+The existing three questions were answered against the real functions and
+definitions. A legal second GET is created only by synchronously decoding the
+shared EP0 OUT buffer after a SETUP indication. The test writes that legal
+tuple into the buffer itself, so it assumes controller DMA ownership and CPU
+visibility. If the buffer instead retained the preceding line-coding bytes,
+their `00 C2...` prefix could be decoded as an unsupported standard request and
+reach an explicit STALL. This is a concrete conditional code path, not evidence
+that T7000 supplied stale data.
+
+The SET-data to status to next-SETUP path programs real helper writes in this
+order: seven-byte OUT receive, zero-byte IN status, then the shared OUT buffer
+with DOEPTSIZ `(1<<19)|64` and EPENA. Correct operation assumes that this is
+sufficient in the selected buffer-DMA mode; the code has no named SUPCNT write,
+and setup arming from `DATA_SEND_STATUS_DONE` does not add CNAK. Earlier setup
+success does not prove the rapid post-SET rearm. No mode-matched T7000 evidence
+currently justifies changing these values.
+
+The state gate closes the modeled duplicate-IN Case C, but OUT event splitting
+remains conditional. `STUP_PKT_RCVD` alone sets `SETUP_PENDING`; if OUT
+XferCompl is separately visible before `SETUP`, the existing code reaches
+`BAD STATUS with COMPL` and stalls EP0 IN. A new minimal test preserves this as
+a named conditional XFAIL. Hardware validity of that ordering is unproven, so
+no USB fix was made.
+
+Review also found that `test_usb_cdc.py` had stubbed
+`usb_dwc2_start_status_phase`. It now extracts and executes the real helper,
+including zero-byte IN status DMA programming; existing A/B/C results remain
+unchanged. The top-level setup dispatcher and actual stall-register helper are
+still shims, and the mock supplies interrupt order, residuals, EPENA transitions
+and setup bytes. These limits are explicit rather than treated as hardware
+success.
+
+The complete answers and test-scope audit are in
+`artifacts/p0-usb/ep0-review/REVIEW-RESULT.md`. No new device correction is
+proposed because both narrowed paths depend on controller premises not yet
+established for T7000.
+
+The self-contained packet is
+`artifacts/p0-usb/ep0-review-package-20260911.zip`, 140311 bytes, SHA-256
+`7BD10347A0A504CD0414B5498D110399D88A3B988C31F9B6589B304918F5DD81`.
+It was expanded into a separate temporary directory and its included
+production sources passed the documented extraction/compile/run procedure.
+Named historical and conditional XFAIL cases were retained. This offline
+result does not substitute for a physical test.
