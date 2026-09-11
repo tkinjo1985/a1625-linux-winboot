@@ -2232,3 +2232,27 @@ NAND operations were not run. Session ae is therefore classified as `target
 payload not executed / USB evaluation not reached`, not as an A/B/C/D USB
 result. The normalized build remains physically untested. The full record is
 `artifacts/p0-usb/session-ae-normalized-state-gate/RESULT.md`.
+
+#### Session ae continuation: normalized build reaches Result B
+
+After the exact DFU instance was restored to `libusbK`, identity was confirmed
+and Pongo passed once. The passive wrapper loaded normalized payload
+`C6F2EFB907B12EC95E22D03F5036A68F663186B36F98529D053D87241B34D9D9`.
+The payload record identifies the expected versioned product at USB(4)/HS04,
+so this is the prepared normalized build rather than Session ab's empty-tag
+binary.
+
+The saved ETL contains the same four-request Result B: first GET success,
+DTR=0 success, SET success, then second GET failure with NT `0xC0000001`, USBD
+`0xC0000004`, and zero bytes. SET completed in 0.094 ms, the second GET was
+dispatched 13.7 microseconds later, and it failed after 9.0518 ms. These are
+host observations only. This removes Session ab's product-length comparison
+constraint and confirms that metadata normalization alone does not fix the
+second-GET boundary.
+
+The wrapper itself ended after `passive-observation-started` without its
+completion marker or final record update; `session.json` remains `starting`.
+No retry was made. The saved ETL was converted and analyzed offline, so Result
+B is retained while whole-wrapper success is not claimed. No active descriptor
+request, COM, P_NOP, ANS or NAND operation followed. Evidence and hashes are in
+the Session ae `RESULT.md`.
