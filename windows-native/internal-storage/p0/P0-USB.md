@@ -2215,3 +2215,20 @@ It was expanded into a separate temporary directory and its included
 production sources passed the documented extraction/compile/run procedure.
 Named historical and conditional XFAIL cases were retained. This offline
 result does not substitute for a physical test.
+
+### Session ae: post-Checkm8 driver gate stop
+
+After a new authorization, the owned A1625 was present in DFU with CPID 7000,
+BDID 34, `libusbK`, and the established USB(4)/HS04 location. The normalized
+payload was rehashed as
+`C6F2EFB907B12EC95E22D03F5036A68F663186B36F98529D053D87241B34D9D9`.
+Checkm8 was invoked once and passed.
+
+The Pongo command then stopped at its pre-transfer identity/driver gate: the
+re-enumerated exact DFU instance used `WINUSB` instead of the required
+`libusbK`. No Pongo bytes were transferred and no retry or automatic driver
+replacement was made. The normalized payload, passive ETW, COM, P_NOP, ANS and
+NAND operations were not run. Session ae is therefore classified as `target
+payload not executed / USB evaluation not reached`, not as an A/B/C/D USB
+result. The normalized build remains physically untested. The full record is
+`artifacts/p0-usb/session-ae-normalized-state-gate/RESULT.md`.
