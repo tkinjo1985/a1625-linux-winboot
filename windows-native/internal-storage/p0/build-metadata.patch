@@ -1,0 +1,26 @@
+diff --git a/version.sh b/version.sh
+index c680fbe..3240e99 100755
+--- a/version.sh
++++ b/version.sh
+@@ -1,9 +1,10 @@
+ #!/bin/sh
++set -eu
+ cd "$(dirname "$0")"
+ 
+ dirbase="$(basename "$(pwd)")"
+ 
+-if [ -n "$M1N1_VERSION_TAG" ]; then
++if [ -n "${M1N1_VERSION_TAG:-}" ]; then
+     version="$M1N1_VERSION_TAG"
+ elif [ -e ".git" ]; then
+     version="$(git describe --tags --always --dirty)"
+@@ -14,4 +15,8 @@ else
+     version="unknown"
+ fi
+ 
+-echo "#define BUILD_TAG \"$version\""
++test -n "$version"
++case "$version" in
++    *\"*|*'\n'*|*'\r'*) echo "invalid build tag" >&2; exit 1 ;;
++esac
++printf '#define BUILD_TAG "%s"\n' "$version"

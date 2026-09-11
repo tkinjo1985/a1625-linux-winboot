@@ -2050,3 +2050,71 @@ The complete record is
 `artifacts/p0-usb/session-ab-ep0-in-state-gate/RESULT.md`. No COM-setting
 success or P_NOP was established. ANS and NAND were not reached. No further
 physical operation or retry follows this result.
+
+## Post-Session ab: fail-closed build metadata and review packet
+
+Session ab's empty tag was traced to its actual MSYS build environment. Git was
+available to the parent PowerShell but absent from the shell PATH. In
+`version.sh`, the failing `git describe` command substitution yielded an empty
+value while the final `echo` still returned success. The Make rule redirected
+that output to a temporary header and moved it over `build_tag.h`; the old
+manifest recorded only patch/payload hashes and never compared the generated
+header or final UTF-16 descriptor with Git. The product-prefix identity gate is
+correctly still a target gate, not a build-quality check.
+
+The Session-ab header was directly read as `#define BUILD_TAG ""` before the
+normalized build, but it had not been frozen or hashed and was later replaced;
+no retrospective header hash is claimed. The exact Session-ab payload and its
+32-byte product completion independently preserve the resulting binary fact.
+
+The build-only correction keeps USB code unchanged. `build.sh` now checks the
+actual shell's Git, Python, make, clang, llvm-objcopy and cargo before touching
+outputs. `version.sh` is fail-closed. `build-quality.py` obtains the nonempty
+Git tag, generates the header into a temporary file, validates the exact
+define, then atomically replaces the header. After linking it verifies the
+complete length/type/UTF-16 product descriptor in both ELF and payload and only
+then atomically publishes `build-quality.json`. `write-manifest.py` refuses a
+missing, stale or inconsistent quality record.
+
+The offline build-quality test covers normal generation, missing Git, failed
+version command, success with empty value, stale header and descriptor mismatch.
+Failure preserves the prior header and does not create a quality record. No
+system-wide PATH or tool installation was changed.
+
+The normalized state-gate build uses the same source revision and device patch
+as Session ab. It generated tag `v1.6.0-137-gd5a10ac-dirty`, product
+`m1n1 uartproxy v1.6.0-137-gd5a10ac-dirty`, and an 82-byte descriptor. The
+verifier found the exact descriptor in ELF and payload. One controlled
+same-input rebuild produced identical header, quality record, ELF and payload
+hashes.
+
+| Build | USB code | generated header / product length | Payload SHA-256 | Comparison status |
+| --- | --- | --- | --- | --- |
+| Session z | EPENA/XFRC | versioned / 82 | `32DAFF697B7F66BE5335A1B020A7310993074607E08116D440DA9F47CA6D96A9` | physical result B |
+| Session ab | state gate | empty / 32 | `4B497D2AD2DDCDF038EB4B0C0D2CFB202F28ACEDCF8761233E32E9ECD94EFD33` | exact payload failed; state-gate-only comparison uncontrolled |
+| normalized | same state gate | `v1.6.0-137-gd5a10ac-dirty` / 82 | `C6F2EFB907B12EC95E22D03F5036A68F663186B36F98529D053D87241B34D9D9` | offline only; suitable artifact conditions restored |
+
+Normalized output hashes are header
+`18F503195CFF315872043A3A553A8A5F8E374B2E354EDD2D9DB1CA81C1373856`,
+quality record
+`35B802FAC91587CA69B91F91C7EF8EFBB42E541F61E13DE9F31702EA7ADD8CCA`,
+ELF `934C62085337CE6AE6A93DD815BA06CD11889DC1986901A5F45D0B8A2D643B76`,
+and manifest `79C3BAEB2D08F4B93D05FD8EC783EA57796C515652F17BF03B3F30F127950F54`.
+The complete build result is
+`artifacts/p0-usb/build-normalized-state-gate/RESULT.md`.
+
+The independent packet at `artifacts/p0-usb/ep0-review/REVIEW.md` contains the
+actual Session-ab/current source, required register/type/MMIO definitions,
+real-code extraction test, separated device/build patches, v/y/z/ab comparison,
+explicit STALL-site table and three bounded review questions. It preserves the
+finding that no static SET-data/next-SETUP receive-address or length mismatch
+was found. It also distinguishes mock assumptions from T7000 observations.
+
+One future passive trial is technically justified only to remove Session ab's
+uncontrolled metadata variable: keep the state-gate USB code unchanged, use
+the normalized 82-byte artifact, and observe the same 35-second sequence. A
+successful second GET records that this build crosses the boundary but does not
+prove tag length was the sole cause; the same STALL confirms the normalized
+state-gate build remains insufficient; moved or missing traffic is failure or
+UNKNOWN. Such a trial would stop before COM, P_NOP, ANS and NAND. It is not
+authorized or executed by this offline work.
