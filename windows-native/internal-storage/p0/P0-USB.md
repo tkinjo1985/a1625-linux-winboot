@@ -2118,3 +2118,22 @@ prove tag length was the sole cause; the same STALL confirms the normalized
 state-gate build remains insufficient; moved or missing traffic is failure or
 UNKNOWN. Such a trial would stop before COM, P_NOP, ANS and NAND. It is not
 authorized or executed by this offline work.
+
+### Session ac: normalized trial stopped at Checkm8
+
+After review approval and a fresh DFU report, the normalized trial began in a
+new Session-ac directory. Checkm8 was invoked once. The target gate verified
+the owned A1625, `libusbK`, and established USB(4)/HS04 location. CPID 7000 /
+BDID 34 identity was read and Checkm8 stages 1 and 2 completed.
+
+The following re-enumeration's 18-byte device-descriptor request returned
+libusb `-7` at the 500 ms timeout. Existing bounded settling/reopen behavior
+stopped at `DFU_IDENTITY_REOPEN_LIMIT` before the next exploit/handoff stage.
+`Checkm8.json` records `status=failed`, `identity_verified=true`, expected
+driver/location and exit code 1; SHA-256 is
+`97AFA48B84BBB6D8EDFF16D886F9106E9086DB35197E1CFFB4F7393865752DD1`.
+
+No retry was made. Pongo, normalized payload, passive ETW, COM, P_NOP, ANS and
+NAND were not run. Thus Session ac adds no normalized-build USB evidence. Its
+record is `artifacts/p0-usb/session-ac-normalized-state-gate/RESULT.md`; another
+attempt requires a fresh DFU state and new instruction.
